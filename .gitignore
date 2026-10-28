@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.deploy/
+.env
+.env.*
+!.env.example
+.dev.vars*
+ops/
+PROJECT_PLAN.md
+*.log
+.DS_Store
