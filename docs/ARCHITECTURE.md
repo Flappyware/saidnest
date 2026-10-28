@@ -30,3 +30,29 @@ Recorders retain data until the repository acknowledges durable storage. Transfe
 Cloudflare Workers serves the initial interface and API. Durable Objects is the proposed relay coordinator; D1 is reserved for service metadata and R2 for optional expiring encrypted delivery buffers. Customer transcript search remains in the owner's repository. GPU inference infrastructure is a separate future selection.
 
 The public application, worker protocol, and relay implementation remain open source. Managed connectivity subscriptions and optional compute usage pay for operated services. Subscription expiry must not prevent local archive access or export.
+
+## MVP boundaries
+
+The first recording release supports one owner and one authoritative repository per library, with multiple paired devices. Separate repositories remain separate libraries; automatic multi-writer replication and shared organization roles are deferred. Capture is user initiated, with explicit sources, meters, pause/stop controls, and interruption reporting. Source labels identify microphone or system output and do not identify remote participants by name.
+
+The first hosted-compute path is authorized by an online repository. A recorder queues audio while that repository is unavailable. A conventional hosted worker receives access only to its assigned audio, never the repository master key. Cloud login and billing entitlements are separate from permission to read content.
+
+## Identity and archive before private capture
+
+Owner identity, archive encryption, transfer sessions, and job grants need separate lifecycles. Key custody, unlock after restart, recovery, replacement-server restore, and revocation must be decided before private recordings are stored. Recovery must not depend on a cloud support override. Pairing must verify device keys so an untrusted relay cannot silently substitute its own key.
+
+The repository service owns database writes. Clients and workers use authenticated APIs rather than writing a shared SQLite file. A backup includes a consistent set of database records, audio chunks, and owner-controlled recovery material.
+
+## Completion and deletion
+
+Capture, delivery, and transcription have independent states. Stopping capture does not mean upload or inference has finished. A final manifest identifies the expected tracks and chunks; a durable acknowledgment requires both verified data and a recoverable metadata commit. Relay receipt and generated text are not proof that the archive is complete or backed up.
+
+Deletion tombstones must reject stale recorder uploads and late worker results. Offline devices apply deletion notices on reconnection, and the interface reports pending cleanup. Retries, cancellation, quota exhaustion, protocol upgrades, and queue limits need explicit behavior before remote recording is released.
+
+## Measurement and release gates
+
+Measure provisional text and finalized text separately, including capture buffering and endpoint detection. Evaluate concurrent microphone/output tracks, overlap, silence, echo, drift, and failure recovery. Select the initial language scope, model, and hardware requirements using a versioned corpus rather than throughput claims alone.
+
+The local alpha needs a clean-machine installer, offline model provisioning, backup restoration, and a release/update policy. The connected alpha needs authenticated pairing, cross-library denial, bounded queues, relay restart recovery, and measured active-stream cost. Hosted processing adds customer isolation, cancellation/retention enforcement, and spending reservations before paid jobs are accepted.
+
+The current starter has CI checks and a manual Cloudflare deployment process. Staging, automated deployment, native release checks, and schema-migration recovery are future work. Cloudflare analytics injection is disabled on the deployed site. See the [plan review](PLAN_REVIEW.md) and [roadmap](ROADMAP.md).
