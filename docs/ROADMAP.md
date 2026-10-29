@@ -10,7 +10,9 @@ The website and interactive timeline contain fictional sample recordings. Search
 
 ## First Windows implementation
 
-Status: Next; implementation not started.
+Status: In progress; development recorder implemented, local-alpha gates still open.
+
+The [Windows prototype](WINDOWS_PROTOTYPE.md) has a native command-line capture path, encrypted chunk store, passphrase/account key wrappers, source meters, explicit pause/stop controls, inspection, and WAV export. Synthetic storage, corruption, overload, and forced-process-exit checks passed locally. A generated-tone process-loopback smoke test and a selected microphone level probe passed; this does not establish real duplex meeting reliability. An initial English synthetic corpus and pinned Whisper CPU/CUDA smoke benchmark exist. Production model selection and representative streaming/meeting measurements remain open.
 
 Deliver one reliable vertical slice before extending the cloud interface or building every device client:
 

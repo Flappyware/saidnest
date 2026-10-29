@@ -2,6 +2,11 @@ node_modules/
 dist/
 .deploy/
 .taste-skill/
+.saidnest/
+**/bin/
+**/obj/
+__pycache__/
+*.py[cod]
 .env
 .env.*
 !.env.example

@@ -4,9 +4,9 @@ Reviewed October 28, 2026. The architecture direction remains local-first record
 
 ## Current evidence
 
-The [Worker](../src/worker.js) exposes preview health, rejects unsupported methods, and serves static assets. The [timeline](../public/app.js) uses fictional in-memory conversations. The [six behavior tests](../test/worker.test.js) and [CI workflow](../.github/workflows/ci.yml) check the starter. Recording, transcription, pairing, persistence, relay, and billing have no implementation in this source revision. CI runs checks and a build; it does not deploy production automatically.
+The [Worker](../src/worker.js) exposes preview health, rejects unsupported methods, and serves static assets. The [timeline](../public/app.js) uses fictional in-memory conversations. The [six behavior tests](../test/worker.test.js) check the deployed starter. The separate [Windows development prototype](WINDOWS_PROTOTYPE.md) now implements native capture and encrypted audio persistence with account/recovery key wrappers and forced-process-exit checks. Initial model smoke benchmarks use generated English speech; inference is not connected to recording or timeline retrieval. Pairing, product authentication, transcript persistence/search, relay, and billing remain unimplemented. CI now includes native archive and benchmark-metric checks; it does not deploy production automatically.
 
-These observations support the foundation-preview milestone only. The full internal plan and deployment-specific records stay in the private operations repository; this review contains public product requirements.
+These observations support the foundation preview and early Windows development evidence. They do not establish local alpha readiness, a secure product repository, or real meeting performance. The full internal plan and deployment-specific records stay in the private operations repository; this review contains public product requirements.
 
 ## Gaps and plan changes
 

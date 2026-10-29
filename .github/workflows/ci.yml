@@ -13,3 +13,17 @@ jobs:
       - run: npm run check
       - run: npm test
       - run: npm run build
+      - run: python3 -m unittest discover -s test -p '*_test.py'
+  windows-capture:
+    runs-on: windows-latest
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_GENERATE_ASPNET_CERTIFICATE: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet restore native/SaidNest.Capture --locked-mode
+      - run: dotnet build native/SaidNest.Capture -c Release --no-restore
+      - run: dotnet run --project native/SaidNest.Capture -c Release --no-build -- self-test
