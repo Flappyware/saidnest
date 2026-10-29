@@ -131,12 +131,14 @@ static class IntegrationTests
             while(!condition()) await Task.Delay(20,deadline.Token);
         }
         for(int second=0;second<4;second++) Offer(second);
-        await Until(()=>File.Exists(Path.Combine(vault.SessionPath(id),"live-output-00000000-draft.snt")));
+        // The writer may commit a source between another source's two polls.
+        // Each source updates independently; one checkpoint does not imply the other exists yet.
+        await Until(()=>new[]{"mic","output"}.All(track=>File.Exists(Path.Combine(vault.SessionPath(id),$"live-{track}-00000000-draft.snt"))));
         Check(Archive.IsRecording(vault,id),"draft appears before capture stops");
         var draft = LiveTranscription.ReadTranscript(vault,id)!;
         Check(draft.Tracks.All(t=>t.State=="provisional" && t.Segments.Length==1),"separate provisional sources");
         for(int second=4;second<9;second++) Offer(second);
-        await Until(()=>File.Exists(Path.Combine(vault.SessionPath(id),"live-output-00000000-final.snt")));
+        await Until(()=>new[]{"mic","output"}.All(track=>File.Exists(Path.Combine(vault.SessionPath(id),$"live-{track}-00000000-final.snt"))));
         var updated = LiveTranscription.ReadTranscript(vault,id)!;
         Check(updated.Tracks.All(t=>t.Segments.Length==1 && t.Segments[0].End==8),"final replaces its draft without duplication");
         await pump.Finish("synthetic live fixture",true); await live.Finish();
