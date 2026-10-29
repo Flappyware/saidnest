@@ -21,11 +21,14 @@ npm run dev
 npm run check
 npm test
 npm run build
+npm run preview
 ```
 
-Open http://localhost:8787. The development server uses the same Worker handler with a local static-assets adapter. Build creates `dist/` and an ignored `.deploy/bundle.json` containing asset hashes and the Worker module.
+Open http://localhost:8787. The development server uses the same Worker handler with a local static-assets adapter. Build creates `dist/` and an ignored `.deploy/bundle.json` containing asset hashes and the Worker module. Use `npm run preview` after building to check the files in `dist/` instead of the development sources; run only one of the two servers at a time.
 
 Frontend work uses the project-local [Taste anti-slop skill](.agents/skills/design-taste-frontend/SKILL.md). Read [AGENTS.md](AGENTS.md) and the [frontend design brief](docs/FRONTEND_DESIGN.md) before changing the website or app screens. The brief records the installed source revision, license, offline constraints, and visual verification workflow.
+
+The first [interface review](docs/UI_REVIEW.md) records the website and app redesign, responsive checks, and remaining validation limits. The preview also supports highlighted search matches and copying individual timestamped passages with their context.
 
 ## Deployment
 

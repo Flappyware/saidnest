@@ -1,6 +1,6 @@
 # SaidNest frontend design
 
-Adopted October 28, 2026. This records the design workflow; the existing website and preview have not yet been redesigned or audited with Taste.
+Adopted October 28, 2026. The first website and app redesign follows Taste's separate page and app workflows. See the [interface review](UI_REVIEW.md) for the direction, browser evidence, and intentional exceptions; this is not a claim of a complete automated Taste inspector pass.
 
 ## Taste adoption
 

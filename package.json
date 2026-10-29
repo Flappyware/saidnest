@@ -8,8 +8,9 @@
   "engines": { "node": ">=22.18" },
   "scripts": {
     "dev": "node scripts/dev.mjs",
+    "preview": "node scripts/dev.mjs --built",
     "build": "node scripts/build.mjs",
-    "check": "node --check src/worker.js && node --check public/app.js",
+    "check": "node --check src/worker.js && node --check public/app.js && node --check public/site.js && node --check public/samples.js",
     "test": "node --test"
   }
 }
