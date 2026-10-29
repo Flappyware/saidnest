@@ -166,6 +166,7 @@ mark { color: var(--ink); background: var(--highlight); border-radius: 2px; }
 .quality-tools { margin: 24px 0 32px; }
 .revision-controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
 .revision-controls label { display: grid; gap: 6px; font-size: 14px; flex: 1 1 180px; min-width: 0; }
+.revision-controls select { width: 100%; min-width: 0; }
 .quality-tools select, .quality-tools textarea { background: var(--white); border: 1px solid var(--control); border-radius: 6px; min-height: 44px; padding: 8px; color: var(--ink); font: inherit; max-width: 100%; }
 .quality-explanation, .refinement-progress { font-size: 13px; color: var(--muted); line-height: 1.6; margin: 12px 0 20px; }
 .quality-review { margin-top: 32px; }

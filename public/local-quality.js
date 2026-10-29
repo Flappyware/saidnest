@@ -20,7 +20,7 @@ export class QualityPanel {
       if(this.open) await this.loadReview();
     } catch(error){ if(host.isConnected)host.textContent=error.message; }
   }
-  releaseAudio(){if(this.reviewAudio){URL.revokeObjectURL(this.reviewAudio);this.reviewAudio=null;}}
+  releaseAudio(){this.host?.querySelectorAll('audio').forEach(audio=>audio.pause());if(this.reviewAudio){URL.revokeObjectURL(this.reviewAudio);this.reviewAudio=null;}}
   async loadReview(){
     const record=this.record,host=this.host;
     try { const data=await (await this.api(`/api/local/sessions/${record.id}/evaluation`)).json(); if(this.host===host&&host.isConnected){this.data=data;this.renderReview();if(this.focusReview){this.focusReview=false;const heading=host.querySelector('h3');heading.tabIndex=-1;heading.focus();heading.scrollIntoView({block:'start'});}} }
@@ -28,6 +28,7 @@ export class QualityPanel {
   }
   renderReview(){
     const root=this.host.querySelector('.quality-review-host'),e=this.escape,data=this.data;
+    root.querySelectorAll('audio').forEach(audio=>audio.pause());
     if(!data.cases.some(c=>c.id===this.caseId))this.caseId=data.cases[0]?.id;
     const item=data.cases.find(c=>c.id===this.caseId); if(!item)return;
     const draft=this.drafts.get(item.id)||{text:item.reference?.text||'',verified:item.reference?.verified||false};

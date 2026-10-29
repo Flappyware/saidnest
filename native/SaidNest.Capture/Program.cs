@@ -63,6 +63,10 @@ static class Program
                 CaptureConditions.ReportSpeakerBleed(vault,Option("--session") ?? throw new ArgumentException("Specify --session ID."));
                 Console.WriteLine("Owner-reported speaker bleed recorded as encrypted capture context. Original audio and references are unchanged.");return 0;
             }
+            if(command=="echo-check") {
+                using var vault=Vault.Open(root);
+                Console.WriteLine(JsonSerializer.Serialize(EchoDiagnostic.Analyze(vault,Option("--session") ?? throw new ArgumentException("Specify --session ID.")),Vault.Json));return 0;
+            }
             if (command == "transcript-check")
             {
                 using var vault=Vault.Open(root);
@@ -219,6 +223,7 @@ static class Program
                   evaluation-summary --session ID   Print metrics only, without transcript words
                   replay --session ID --install PROFILE.json  Replay the full live schedule offline
                   report-speaker-bleed --session ID  Save owner-reported capture context
+                  echo-check --session ID          Print waveform similarity metrics, without words
                   serve [--port 8788]               Open the authenticated loopback-only timeline
                   open                             Reopen the running private timeline without printing its key
                   live-status --session ID          Show counts and timing only; no transcript text

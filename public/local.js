@@ -99,6 +99,7 @@ async function loadAudio(record, track) {
 
 function renderReader(record) {
   audioRequest?.abort();
+  reader.querySelectorAll('audio').forEach(audio=>audio.pause());
   displayedRecord=record;
   if (!record) { reader.innerHTML = '<div class="empty-state"><h2>No recording selected</h2><p>Your matching recording will appear here.</p></div>'; return; }
   if (!record.tracks.includes(selectedTrack)) selectedTrack = record.tracks[0];
@@ -134,6 +135,9 @@ function renderReader(record) {
   document.querySelector('#transcribe-local').hidden=true;
   quality.attach(record,reader);
 }
+
+// A detached or second player must not keep sounding during source/reference review.
+document.addEventListener('play',event=>{if(event.target instanceof HTMLMediaElement)document.querySelectorAll('audio').forEach(audio=>{if(audio!==event.target)audio.pause();});},true);
 
 function render() { status.hidden = true; renderReader(renderList()); }
 list.addEventListener('click', event => {

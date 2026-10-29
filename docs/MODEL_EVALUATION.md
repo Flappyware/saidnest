@@ -54,4 +54,6 @@ Use a headphone recording as the next clean baseline, then a separate speaker te
 
 Relevant implementation references are [WebRTC AudioProcessing](https://webrtc.googlesource.com/src/+/refs/heads/main/api/audio/audio_processing.h) and [Windows Voice Capture DSP](https://learn.microsoft.com/en-us/windows/win32/medfound/voicecapturedmo). No echo-cancellation implementation was added in this change.
 
+`echo-check --session SESSION_ID` compares the two original sources at the frozen evaluation times. It box-downsamples eight-second windows to 2.4kHz and searches absolute waveform correlation from -100 to +300ms lag. It prints metrics only. This is supporting similarity evidence, not calibrated acoustic delay, speaker identity, or echo cancellation. The local interface also permits only one audio player at a time and pauses players before changing sources or rebuilding reference controls, preventing playback overlap from confusing listening checks.
+
 Expand checked references to names, accents, overlapping voices, boundary words, low-level speech, and verified silence. Compare a resident worker to remove repeated model loading. Measure word timing and diarization separately from word recognition. Preserve corrections and revision provenance before enabling automatic model promotion or semantic agent access.
