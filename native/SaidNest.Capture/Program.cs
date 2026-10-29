@@ -22,6 +22,9 @@ static class Program
                 string fixtureRoot = Path.Combine(Option("--out") ?? ".saidnest/ui-fixtures", Guid.NewGuid().ToString("N"));
                 using var fixtureVault = Vault.Create(fixtureRoot, Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)));
                 string fixtureId = await IntegrationTests.Fixture(fixtureVault);
+                if(args.Contains("--quality")) {
+                    await Transcription.Run(fixtureVault,fixtureId,"fixture",testDecoder:(audio,track,_)=>Task.FromResult(new TrackTranscript(track,"transcribed",audio.DurationSeconds,"Synthetic refinement fixture",[new(track,0,audio.DurationSeconds,"A synthetic refined transcript for interface verification.")])));
+                }
                 using var fixtureLease = args.Contains("--live") ? new FileStream(Path.Combine(fixtureVault.SessionPath(fixtureId),"capture.lock"),FileMode.Open,FileAccess.ReadWrite,FileShare.None) : null;
                 if (fixtureLease!=null)
                 {
@@ -51,6 +54,15 @@ static class Program
                 Console.WriteLine(JsonSerializer.Serialize(LiveTranscription.ReadStatus(vault, Option("--session") ?? throw new ArgumentException("Specify --session ID.")), Vault.Json));
                 return 0;
             }
+            if(command=="refinement-status") {
+                using var vault=Vault.Open(root);
+                Console.WriteLine(JsonSerializer.Serialize(Transcription.ReadRefinement(vault,Option("--session") ?? throw new ArgumentException("Specify --session ID.")),Vault.Json)); return 0;
+            }
+            if(command=="report-speaker-bleed") {
+                using var vault=Vault.Open(root);
+                CaptureConditions.ReportSpeakerBleed(vault,Option("--session") ?? throw new ArgumentException("Specify --session ID."));
+                Console.WriteLine("Owner-reported speaker bleed recorded as encrypted capture context. Original audio and references are unchanged.");return 0;
+            }
             if (command == "transcript-check")
             {
                 using var vault=Vault.Open(root);
@@ -78,6 +90,7 @@ static class Program
                 string url = vault.Read(Path.GetFileName(launch)).Metadata.GetProperty("url").GetString()!;
                 var address = new Uri(url);
                 if(address.Scheme!="http" || address.Host!="127.0.0.1" || address.AbsolutePath!="/app/") throw new InvalidDataException("Invalid local launch address.");
+                if(args.Contains("--review")) url=url.Replace("/app/#","/app/?review=1#");
                 Process.Start(new ProcessStartInfo(url) { UseShellExecute=true });
                 Console.WriteLine("The private local timeline was reopened. No access key is printed.");
                 return 0;
@@ -88,6 +101,22 @@ static class Program
                 var revision = await Transcription.Run(vault, Option("--session") ?? throw new ArgumentException("Specify --session ID."), Option("--install") ?? ".saidnest/inference/install.json");
                 Console.WriteLine(JsonSerializer.Serialize(new { revision.SessionId, revision.Id, tracks = revision.Tracks.Select(track => new { track.Track, track.State, segments = track.Segments.Length, track.Notice }) }, Vault.Json));
                 return 0;
+            }
+            if(command=="evaluate") {
+                using var vault=Vault.Open(root);
+                string id=Option("--session") ?? throw new ArgumentException("Specify --session ID.");
+                var run=await Evaluation.Run(vault,id,Option("--install") ?? ".saidnest/inference/install.json",Option("--corpus") ?? ".saidnest/corpus/en-synthetic-v0");
+                Console.WriteLine(JsonSerializer.Serialize(Evaluation.Summary(vault,id,run),Vault.Json)); return 0;
+            }
+            if(command=="evaluation-summary") {
+                using var vault=Vault.Open(root);
+                string id=Option("--session") ?? throw new ArgumentException("Specify --session ID.");
+                Console.WriteLine(JsonSerializer.Serialize(Evaluation.Runs(vault,id).Select(run=>Evaluation.Summary(vault,id,run)),Vault.Json)); return 0;
+            }
+            if(command=="replay") {
+                using var vault=Vault.Open(root);
+                var report=await ReplayEvaluation.Run(vault,Option("--session") ?? throw new ArgumentException("Specify --session ID."),Option("--install") ?? ".saidnest/inference/install.json");
+                Console.WriteLine(JsonSerializer.Serialize(new {report.Id,report.State,report.Model,report.MeetingSeconds,report.WallSeconds,report.Jobs,report.MissedDeadlines,report.MaxStartBacklogSeconds,report.MaxFinishLagSeconds,report.RevisionId},Vault.Json));return 0;
             }
             if (command == "diagnose")
             {
@@ -143,6 +172,15 @@ static class Program
                 string? mic = Option("--mic"), output = Option("--output");
                 using var vault = Vault.Open(root);
                 var result = await Recorder.Record(vault, mic, output, seconds, liveInstall: args.Contains("--live") ? Option("--install") ?? ".saidnest/inference/install.json" : null);
+                if(result.State=="complete" && Option("--refine-install") is { } refinement) {
+                    Console.WriteLine("Capture finished. Starting the selected local refinement model; the live transcript is retained.");
+                    try {
+                        var revised=await Transcription.Run(vault,result.Id,refinement);
+                        Console.WriteLine($"Refinement saved: {revised.Tracks.Sum(t=>t.Segments.Length)} passages. No transcript text is logged.");
+                    } catch(Exception) {
+                        Console.Error.WriteLine("Recording was saved. Later refinement did not finish; original audio and live text are retained.");return 3;
+                    }
+                }
                 return result.State == "complete" ? 0 : 2;
             }
             if (command is "inspect" or "sessions" or "export")
@@ -177,6 +215,10 @@ static class Program
                   diagnose --session ID            Check levels, flags, and intentional pause gaps
                   play --session ID --track mic|output [--start 0] [--seconds 10]
                   transcribe --session ID           Save an encrypted local English transcript revision
+                  evaluate --session ID --install PROFILE.json  Compare frozen excerpts and scripted corpus
+                  evaluation-summary --session ID   Print metrics only, without transcript words
+                  replay --session ID --install PROFILE.json  Replay the full live schedule offline
+                  report-speaker-bleed --session ID  Save owner-reported capture context
                   serve [--port 8788]               Open the authenticated loopback-only timeline
                   open                             Reopen the running private timeline without printing its key
                   live-status --session ID          Show counts and timing only; no transcript text
@@ -191,7 +233,7 @@ static class Program
                 Sources must be explicitly selected. Omit --mic or --output to exclude that source.
                 Local transcription requires the separately provisioned experimental CUDA model.
                 Live transcription uses bounded eight-second windows; updates at about four seconds.
-                Saved playback uses one-minute windows. Whole-recording retranscription is capped at ten minutes.
+                Saved playback uses one-minute windows; refinement uses thirty-second windows.
                 No cloud is required.
                 """);
             return command == "help" ? 0 : 1;

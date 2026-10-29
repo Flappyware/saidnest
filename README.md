@@ -7,12 +7,13 @@ SaidNest is an open-source project for local audio capture, transcription, and a
 - Website: [saidnest.com](https://saidnest.com)
 - Interactive preview: [saidnest.com/app/](https://saidnest.com/app/)
 - [Architecture](docs/ARCHITECTURE.md), [roadmap](docs/ROADMAP.md), and [plan review](docs/PLAN_REVIEW.md)
+- [Local model comparison and refinement](docs/MODEL_EVALUATION.md), [Speakr/WhisperX review](docs/SPEAKR_REVIEW.md)
 
 ## Current release
 
 The deployed release contains the public website, an interactive timeline using fictional sample conversations, and a Cloudflare Worker health endpoint. Search, transcript selection, clipboard copy, and transcript downloads work in the preview. The preview does not request microphone access, accept uploads, or persist transcript content.
 
-A separate [Windows prototype](docs/WINDOWS_PROTOTYPE.md) provides explicit source selection, encrypted audio chunks, and crash-recovery inspection. Use `Start-Live-SaidNest.cmd` for rolling real-time English text during capture, or `Start-SaidNest.cmd` for audio only. Open `Start-Local-SaidNest.cmd` for the authenticated local timeline, playback, search, and timestamped copy/export. Live inference uses bounded eight-second windows and browser playback uses one-minute windows; whole-recording retranscription remains capped at ten minutes. Inference requires the provisioned CUDA runtime. It remains a development prototype; pairing, remote authentication, sync, and billing are planned.
+A separate [Windows prototype](docs/WINDOWS_PROTOTYPE.md) provides explicit source selection, encrypted audio chunks, and crash-recovery inspection. Use `Start-Live-SaidNest.cmd` for rolling real-time English text during capture, or `Start-SaidNest.cmd` for audio only. Open `Start-Local-SaidNest.cmd` for the authenticated local timeline, playback, search, and timestamped copy/export. Live inference uses eight-second windows, later refinement uses thirty-second windows, and browser playback uses one-minute windows. Model comparison and encrypted checked-reference scoring support measured model choices. Inference requires the provisioned CUDA runtime. It remains a development prototype; pairing, remote authentication, sync, and billing are planned.
 
 ## Development
 

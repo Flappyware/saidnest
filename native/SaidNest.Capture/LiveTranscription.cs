@@ -101,6 +101,6 @@ sealed class LiveTranscription(Vault vault, SessionInfo session, string installF
                 "Experimental local English rolling transcription. Current draft may change; check wording at window boundaries.", selected.SelectMany(p => p.Transcript.Segments).ToArray());
         }).ToArray();
         var status = ReadStatus(vault,id);
-        return new(1, Guid.NewGuid().ToString("N"), id, DateTimeOffset.UtcNow, $"whisper.cpp {install?.RuntimeBuild ?? status?.Runtime} CUDA rolling", install?.ModelSha256 ?? status?.ModelSha256 ?? "unknown", install?.ModelRevision ?? status?.ModelRevision ?? "unknown", "en", tracks);
+        return new(1, Guid.NewGuid().ToString("N"), id, DateTimeOffset.UtcNow, $"whisper.cpp {install?.RuntimeBuild ?? status?.Runtime} CUDA rolling", install?.ModelSha256 ?? status?.ModelSha256 ?? "unknown", install?.ModelRevision ?? status?.ModelRevision ?? "unknown", "en", tracks,"live",install==null?"unknown":Transcription.Name(install),WindowSeconds:8);
     }
 }

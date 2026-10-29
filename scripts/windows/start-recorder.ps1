@@ -1,4 +1,4 @@
-param([int]$Seconds = 600, [string]$MicrophoneName, [switch]$UseDefaultOutput, [string]$OutputId, [switch]$Live)
+param([int]$Seconds = 600, [string]$MicrophoneName, [switch]$UseDefaultOutput, [string]$OutputId, [switch]$Live,[ValidateSet('tiny.en','small.en','large-v3-turbo','large-v3')][string]$LiveModel='tiny.en',[ValidateSet('tiny.en','small.en','large-v3-turbo','large-v3')][string]$RefineModel)
 $ErrorActionPreference = 'Stop'
 $captureRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 Set-Location -LiteralPath $captureRoot
@@ -47,12 +47,19 @@ if (-not (Test-Path -LiteralPath '.saidnest/vault/vault.json')) {
 }
 $captureArguments = @('record', '--seconds', "$Seconds")
 if ($Live) {
-    if (-not (Test-Path -LiteralPath '.saidnest/inference/install.json')) { throw 'Provision the local model with scripts/windows/provision-whisper.ps1 before choosing live transcription.' }
-    $captureArguments += '--live'
+    $liveInstall=if($LiveModel -eq 'tiny.en'){'.saidnest/inference/install.json'}else{".saidnest/inference/install-$LiveModel.json"}
+    if (-not (Test-Path -LiteralPath $liveInstall)) { throw 'Provision the selected live model with scripts/windows/provision-whisper.ps1 first.' }
+    $captureArguments += @('--live','--install',$liveInstall)
+}
+if($RefineModel) {
+    $refinementInstall=if($RefineModel -eq 'tiny.en'){'.saidnest/inference/install.json'}else{".saidnest/inference/install-$RefineModel.json"}
+    if(-not (Test-Path -LiteralPath $refinementInstall)) { throw 'Provision the selected refinement model first.' }
+    $captureArguments+=@('--refine-install',$refinementInstall)
 }
 if ($captureMic) { $captureArguments += @('--mic', $captureMic) }
 if ($captureOutput) { $captureArguments += @('--output', $captureOutput) }
 Write-Host "`nRecording starts now. P pauses/resumes. Q stops. Audio stays in the local encrypted vault."
 & $captureExe @captureArguments
+if ($LASTEXITCODE -eq 3) { Write-Host 'Recording is saved. Later refinement did not finish; open the local timeline to review or retry it.'; return }
 if ($LASTEXITCODE -ne 0) { throw 'Recording was interrupted. Use the sessions command to inspect saved chunks.' }
 Write-Host "`nRecording is saved locally. Open Start-Local-SaidNest.cmd to play it and create a local transcript."

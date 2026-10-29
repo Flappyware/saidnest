@@ -1,4 +1,5 @@
 // This module is served by the local repository only. The cloud preview keeps app.js.
+import {QualityPanel} from './local-quality.js';
 const list = document.querySelector('#recording-list');
 const reader = document.querySelector('#transcript');
 const search = document.querySelector('#search');
@@ -7,7 +8,8 @@ const notice = document.querySelector('.preview-notice');
 const status = document.querySelector('#announcement');
 const fixture = document.body.dataset.fixture === 'true';
 let records = [], selectedId, selectedTrack = 'mic', selectedWindow=0, displayedRecord, audioUrl, audioKey, downloadUrl, audioRequest, pollTimer, refreshing=false;
-const active = record => record.state === 'recording' || ['starting','running','finishing'].includes(record.live?.state);
+const liveActive = record => record.state === 'recording' || ['starting','running','finishing'].includes(record.live?.state);
+const active = record => liveActive(record) || record.refinement?.state==='running';
 const escape = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const trackName = id => id === 'mic' ? 'Microphone' : 'System output';
 const clock = seconds => { const value = Math.max(0, Math.floor(seconds)); return `${Math.floor(value / 60).toString().padStart(2, '0')}:${(value % 60).toString().padStart(2, '0')}`; };
@@ -16,6 +18,7 @@ const segments = record => record.transcript?.tracks.flatMap(track => track.segm
 const visible = record => (filter.value === 'all' || (filter.value === 'duplex' ? record.tracks.length === 2 : record.tracks.length === 1 && record.tracks[0] === filter.value)) &&
   [title(record), ...segments(record).map(segment => segment.text)].join(' ').toLowerCase().includes(search.value.trim().toLowerCase());
 const notify = text => { status.textContent = text; status.hidden = false; };
+const quality=new QualityPanel({api,notify,escape,clock,autoReview:new URLSearchParams(location.search).has('review'),onRecord:updated=>{records=records.map(r=>r.id===updated.id?updated:r);render();}});
 
 document.title = 'Your local timeline — SaidNest';
 document.querySelector('.preview-label').textContent = fixture ? 'Synthetic test archive' : 'Local archive';
@@ -41,7 +44,7 @@ try {
 } catch (error) { notice.textContent = error.message; }
 
 async function api(path, options = {}) {
-  const response = await fetch(path, {...options, cache:'no-store', credentials:'omit', headers:{Authorization:`Bearer ${token}`}});
+  const response = await fetch(path, {...options, cache:'no-store', credentials:'omit', headers:{...options.headers,Authorization:`Bearer ${token}`}});
   if (response.status === 401) { sessionStorage.removeItem('saidnest-local-key'); throw new Error('Local access expired. Reopen the timeline from the local launcher.'); }
   if (!response.ok) throw new Error(response.status === 409 ? 'Another local operation is running. Try again shortly.' : 'The local operation could not finish. Saved audio is unchanged.');
   return response;
@@ -60,7 +63,7 @@ function highlighted(text) {
 }
 
 function transcriptText(record, track) {
-  return `SaidNest — local transcript${active(record) ? ' (provisional live text)' : ''}\n${title(record)}\n${new Date(record.startedUtc).toLocaleString()}\n${trackName(track)}\n\n` +
+  return `SaidNest — local transcript${liveActive(record) ? ' (provisional live text)' : ''}\n${title(record)}\n${new Date(record.startedUtc).toLocaleString()}\n${trackName(track)}\n\n` +
     (record.transcript?.tracks.find(item => item.track === track)?.segments || []).map(item => `[${clock(item.start)}] ${trackName(item.track)}: ${item.text}`).join('\n\n');
 }
 
@@ -107,6 +110,7 @@ function renderReader(record) {
   const flagged = record.diagnosticFlags.filter(item => item.flags & 1).length;
   reader.innerHTML = `<button class="back-to-list subtle-button" id="back-local">← Conversations</button><div class="transcript-top"><span>${record.state === 'complete' ? 'Audio saved' : 'Interrupted recording'}</span><span>Local only</span></div><h2 id="transcript-title" tabindex="-1">${escape(title(record))}</h2><p class="transcript-meta">${escape(new Date(record.startedUtc).toLocaleString())} <span>·</span> ${clock(record.durationSeconds)}</p><div class="local-player"><label for="audio-track">Audio source</label><select id="audio-track">${record.tracks.map(id=>`<option value="${escape(id)}" ${id===selectedTrack?'selected':''}>${trackName(id)}</option>`).join('')}</select><audio id="local-audio" controls preload="metadata" aria-label="Saved recording playback"></audio><p id="audio-status" role="status">Loading audio locally…</p></div><p class="recording-diagnostics">${pauses.length ? escape(pauses.join('. ')) + '. ' : ''}${flagged ? `${flagged} device flags retained for review. ` : ''}Timestamps use the saved recording clock.</p><div class="transcript-actions"><button id="transcribe-local" class="button small">${record.transcript ? 'Transcribe again' : 'Transcribe locally'}</button>${parts.length ? `<button id="copy-local" class="button small secondary">Copy transcript</button><a class="subtle-button" href="${downloadUrl}" download="saidnest-${record.id}-${selectedTrack}.txt">Download .txt</a>` : ''}</div><p class="local-model-note">${escape(track?.notice || 'Run the local experimental English model to create a transcript. Audio is never sent to a cloud service.')}</p><div class="transcript-segments">${parts.map((part,index)=>`<article class="segment"><button class="timestamp seek-passage" data-seek="${part.start}" aria-label="Play at ${clock(part.start)}">${clock(part.start)}</button><div><div class="segment-heading"><span class="speaker">${trackName(selectedTrack)}${record.live && record.live.state!=="complete" && part.start >= (record.live.tracks.find(t=>t.track===selectedTrack)?.finalizedSeconds ?? Infinity) ? " · Draft" : ""}</span><button class="copy-passage" data-copy="${index}" aria-label="Copy passage at ${clock(part.start)}">Copy</button></div><p>${highlighted(part.text)}</p></div></article>`).join('') || '<p class="local-empty-transcript">No transcript passages for this source yet. The saved audio is available above.</p>'}</div><p class="transcript-end">${record.transcript ? 'Transcript revision saved encrypted. Original audio is unchanged.' : 'Capture is complete. Transcription is a separate local operation.'}</p>`;
   loadAudio(record,selectedTrack);
+  if(record.captureConditions?.speakerBleedReported) { const condition=document.createElement('p');condition.className='recording-diagnostics';condition.textContent=record.captureConditions.notice;document.querySelector('.local-player').before(condition); }
   const playbackWindow=document.createElement('select'); playbackWindow.id='audio-window'; playbackWindow.setAttribute('aria-label','Playback minute');
   for(let second=0;second<Math.max(1,record.durationSeconds);second+=60) { const option=document.createElement('option'); option.value=second; option.textContent=`From ${clock(second)}`; option.selected=second===selectedWindow; playbackWindow.append(option); }
   document.querySelector('.local-player').insertBefore(playbackWindow,document.querySelector('#local-audio'));
@@ -118,15 +122,17 @@ function renderReader(record) {
   }
   if(record.live) {
     const liveNote=document.createElement('p'); liveNote.id='live-progress'; liveNote.className='local-live-progress'; liveNote.setAttribute('role','status');
-    liveNote.textContent=`Live transcription: ${record.live.state}. `+record.live.tracks.map(t=>`${trackName(t.track)}: ${clock(t.finalizedSeconds)} finalized, ${t.finalPassages} passages, ${t.peakDbfs > -45 ? 'audio detected' : 'quiet in latest window'}`).join(' · ')+(active(record)?'. Current draft may change.':'.');
+    liveNote.textContent=`Live transcription: ${record.live.state}. `+record.live.tracks.map(t=>`${trackName(t.track)}: ${clock(t.finalizedSeconds)} finalized, ${t.finalPassages} passages, ${t.peakDbfs > -45 ? 'audio detected' : 'quiet in latest window'}`).join(' · ')+(liveActive(record)?'. Current draft may change.':'.');
     document.querySelector('.transcript-actions').before(liveNote);
     document.querySelector('.local-model-note').textContent=record.live.notice;
-    if(active(record)) document.querySelector('.transcript-end').textContent='Recording and transcription are separate. Live text updates automatically; the current window is provisional.';
+    if(liveActive(record)) document.querySelector('.transcript-end').textContent='Recording and transcription are separate. Live text updates automatically; the current window is provisional.';
   }
-  if (record.durationSeconds > 600 || record.state !== 'complete') {
+  if (record.state !== 'complete') {
     document.querySelector('#transcribe-local').disabled=true;
     if(!record.live) document.querySelector('.local-model-note').textContent=record.state !== 'complete' ? 'Transcription requires a finalized recording. Retained audio can still be reviewed.' : 'Full-recording retranscription currently supports up to ten minutes. Live transcripts and minute-by-minute playback are retained.';
   }
+  document.querySelector('#transcribe-local').hidden=true;
+  quality.attach(record,reader);
 }
 
 function render() { status.hidden = true; renderReader(renderList()); }
@@ -177,7 +183,7 @@ async function start(silent=false) {
   if(!silent) { list.innerHTML='<p class="empty-state">Opening local archive…</p>'; document.querySelector('#result-count').textContent=''; }
   if (!token) { list.innerHTML='<p class="empty-state">Local archive locked. Reopen it from the launcher.</p>'; refreshing=false; return; }
   try {
-    const saved = silent ? await Promise.all(records.map(async record=>active(record) ? await (await api(`/api/local/sessions/${record.id}`)).json() : record)) : await (await api('/api/local/sessions')).json();
+    const saved = silent ? await Promise.all(records.map(async record=>record.refinement?.state==='running' && !liveActive(record) ? {...record,...await (await api(`/api/local/sessions/${record.id}/progress`)).json()} : active(record) ? await (await api(`/api/local/sessions/${record.id}`)).json() : record)) : await (await api('/api/local/sessions')).json();
     if (saved.some(record=>record.state==='corrupt')) notice.textContent='A recording failed verification and was not opened. Its original files are retained for recovery.';
     else if (saved.some(record=>record.state==='recording')) notice.textContent=(fixture?'Synthetic recording fixture. ':'')+'Recording now. Live local text updates automatically. Use Stop recording to finish before the fixed duration.';
     else if (saved.length===100) notice.textContent='Showing the 100 most recently updated recordings. A larger archive browser is planned.';

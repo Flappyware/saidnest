@@ -1,0 +1,58 @@
+// Local-only revision selection and owner-checked evaluation. No external requests.
+export class QualityPanel {
+  constructor({api,notify,escape,clock,onRecord,autoReview=false}) { Object.assign(this,{api,notify,escape,clock,onRecord}); this.open=autoReview; this.focusReview=autoReview; this.drafts=new Map(); this.caseId=null; this.scoreTrack='all'; }
+  async attach(record,reader) {
+    this.record=record; this.reader=reader;
+    const host=document.createElement('section'); host.className='quality-tools'; this.host=host;
+    reader.querySelector('.transcript-segments').before(host);
+    try {
+      const [revisions,models]=await Promise.all([this.api(`/api/local/sessions/${record.id}/revisions`).then(r=>r.json()),this.api('/api/local/models').then(r=>r.json())]);
+      if(this.host!==host || !host.isConnected) return;
+      const e=this.escape;
+      host.innerHTML=`<div class="revision-controls"><label>Transcript version<select id="transcript-revision" ${record.state==='recording'?'disabled':''}>${revisions.map(r=>`<option value="${e(r.id)}" ${r.id===record.transcript?.id?'selected':''}>${e(r.model)} · ${r.kind==='replay'?'Replay':r.kind==='live'||(r.kind==='legacy'&&r.model==='tiny.en')?'Live':'Refined'} · ${r.passages} passages</option>`).join('')}</select></label><label>Refinement model<select id="refinement-model">${models.map(m=>`<option value="${e(m.id)}" ${m.id==='large-v3'?'selected':''}>${e(m.name)}</option>`).join('')}</select></label><button id="refine-transcript" class="button small" ${record.state!=='complete'||record.refinement?.state==='running'||!models.length?'disabled':''}>Create refined version</button><button id="review-transcription" class="button small secondary">Review accuracy</button></div><p class="quality-explanation">Refinement creates a new, unverified encrypted version. The live transcript and original audio remain available. A larger model is a candidate, not a checked reference.</p><p class="refinement-progress" role="status">${record.refinement?e(`${record.refinement.model}: ${record.refinement.state}. ${Math.round(record.refinement.processedSeconds)} of ${Math.round(record.refinement.totalSeconds)} source seconds processed.`):''}</p><div class="quality-review-host"></div>`;
+      host.querySelector('#transcript-revision').addEventListener('change',async event=>{ try { const updated=await (await this.api(`/api/local/sessions/${record.id}/revision`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:event.target.value})})).json(); this.onRecord(updated); } catch(error){this.notify(error.message);} });
+      host.querySelector('#refine-transcript').addEventListener('click',async event=>{
+        const button=event.currentTarget; button.disabled=true; button.textContent='Refining locally…';
+        try { const updated=await (await this.api(`/api/local/sessions/${record.id}/refine`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:host.querySelector('#refinement-model').value})})).json(); this.onRecord(updated); this.notify('New transcript revision saved. The original is retained.'); }
+        catch(error){button.disabled=false;button.textContent='Create refined version';this.notify(error.message);}
+      });
+      host.querySelector('#review-transcription').addEventListener('click',()=>{this.open=!this.open; if(this.open){this.focusReview=true;this.loadReview();}else{host.querySelector('.quality-review-host').innerHTML='';this.releaseAudio();}});
+      if(this.open) await this.loadReview();
+    } catch(error){ if(host.isConnected)host.textContent=error.message; }
+  }
+  releaseAudio(){if(this.reviewAudio){URL.revokeObjectURL(this.reviewAudio);this.reviewAudio=null;}}
+  async loadReview(){
+    const record=this.record,host=this.host;
+    try { const data=await (await this.api(`/api/local/sessions/${record.id}/evaluation`)).json(); if(this.host===host&&host.isConnected){this.data=data;this.renderReview();if(this.focusReview){this.focusReview=false;const heading=host.querySelector('h3');heading.tabIndex=-1;heading.focus();heading.scrollIntoView({block:'start'});}} }
+    catch { if(host.isConnected)host.querySelector('.quality-review-host').innerHTML='<p class="quality-explanation">No model comparison is prepared for this recording yet. Prepare a local evaluation before reviewing accuracy.</p>'; }
+  }
+  renderReview(){
+    const root=this.host.querySelector('.quality-review-host'),e=this.escape,data=this.data;
+    if(!data.cases.some(c=>c.id===this.caseId))this.caseId=data.cases[0]?.id;
+    const item=data.cases.find(c=>c.id===this.caseId); if(!item)return;
+    const draft=this.drafts.get(item.id)||{text:item.reference?.text||'',verified:item.reference?.verified||false};
+    const percent=value=>value==null?'Not scored':`${(value*100).toFixed(1)}%`;
+    root.innerHTML=`<section class="quality-review" aria-label="Transcription quality review"><div class="quality-heading"><h3>Check the words</h3><button id="refresh-comparison" class="subtle-button">Refresh results</button></div><p>Listen, correct a short reference, and mark it checked. Model agreement is not accuracy. Empty references may be checked for genuine silence.</p><div class="quality-table-scroll"><table><caption>Same recorded excerpts, same decoding settings</caption><thead><tr><th>Model</th><th>Worst two-source batch</th><th>Missed four-second deadlines</th><th>Meeting word error rate</th><th>Checked clips</th><th>Synthetic word error rate</th></tr></thead><tbody>${data.summaries.map(s=>`<tr><th scope="row">${e(s.model.name)}</th><td>${s.maxDuplexBatchSeconds.toFixed(2)}s</td><td>${s.missedFourSecondDeadlines}</td><td>${percent(s.wordErrorRate)}</td><td>${s.verifiedReferences}/${s.cases}</td><td>${percent(s.corpus.find(c=>c.case==='speech')?.score.wordErrorRate)}</td></tr>`).join('')}</tbody></table></div><p class="quality-explanation">Timing is a replay of selected meeting excerpts, not a sustained live qualification. Synthetic accuracy uses a separate scripted voice clip. Meeting scores use only your checked references; fewer word errors are better. These speech-heavy samples were chosen using the original live model, so they do not represent the whole meeting.</p><label for="review-case">Reference passage</label><select id="review-case">${data.cases.map((c,i)=>`<option value="${e(c.id)}" ${c.id===item.id?'selected':''}>${i+1}. ${c.track==='mic'?'Microphone':'System output'} · ${this.clock(c.start)} · ${c.seconds}s${c.reference?.verified?' · Checked':''}</option>`).join('')}</select><button id="load-review-audio" class="button small secondary">Load this audio excerpt</button><audio id="review-audio" controls aria-label="Reference passage audio"></audio><p id="review-audio-note" role="status">Only this short excerpt is decrypted into browser memory.</p><div class="quality-candidates">${item.candidates.map((candidate,i)=>`<article><div class="quality-heading"><h4>${e(candidate.model)}</h4><button class="subtle-button" data-use-draft="${i}">Use wording as draft</button></div><p>${e(candidate.text)||'No words inferred.'}</p><p class="quality-explanation">${candidate.disagreementWithTiny==null?'No baseline comparison.':`${percent(candidate.disagreementWithTiny)} word-edit disagreement with tiny.en; not an accuracy score.`}${candidate.score?` Checked-reference word error rate: ${percent(candidate.score.wordErrorRate)}.`:''}</p></article>`).join('')}</div><label for="reference-text">Words checked against the audio</label><textarea id="reference-text" rows="5" spellcheck="false"></textarea><label class="reference-check"><input id="reference-verified" type="checkbox" ${draft.verified?'checked':''}>I listened and checked these words.</label><button id="save-reference" class="button small">Save reference locally</button><p class="quality-explanation">References and model outputs stay encrypted on this computer. Editing a reference clears its checked status until you verify it again.</p></section>`;
+    root.querySelector('#reference-text').value=draft.text;
+    const scope=document.createElement('label');scope.className='score-scope';scope.textContent='Score source';const scopeSelect=document.createElement('select');scopeSelect.setAttribute('aria-label','Score source');scopeSelect.innerHTML='<option value="all">Both sources</option><option value="mic">Microphone</option><option value="output">System output</option>';scopeSelect.value=this.scoreTrack;scope.append(scopeSelect);if(data.summaries.some(s=>Array.isArray(s.byTrack)))root.querySelector('.quality-table-scroll').before(scope);
+    if(this.scoreTrack!=='all') root.querySelectorAll('tbody tr').forEach((row,index)=>{const score=data.summaries[index].byTrack?.find(t=>t.track===this.scoreTrack);row.children[3].textContent=percent(score?.wordErrorRate);row.children[4].textContent=`${score?.verifiedReferences??0}/${data.cases.filter(c=>c.track===this.scoreTrack).length}`;});
+    scopeSelect.addEventListener('change',()=>{this.scoreTrack=scopeSelect.value;this.renderReview();});
+    if(data.captureConditions?.speakerBleedReported) {const note=document.createElement('p');note.className='recording-diagnostics';note.textContent=data.captureConditions.notice;root.querySelector('h3').parentElement.after(note);}
+    root.querySelector('#refresh-comparison').addEventListener('click',()=>this.loadReview());
+    root.querySelector('#review-case').addEventListener('change',event=>{this.caseId=event.target.value;this.releaseAudio();this.renderReview();});
+    root.querySelector('#load-review-audio').addEventListener('click',async event=>{
+      const button=event.currentTarget;button.disabled=true;
+      try { const response=await this.api(`/api/local/sessions/${this.record.id}/audio/${item.track}?start=${item.start}&seconds=${item.seconds}`);this.releaseAudio();this.reviewAudio=URL.createObjectURL(await response.blob());root.querySelector('#review-audio').src=this.reviewAudio;root.querySelector('#review-audio-note').textContent=`Ready: ${item.track==='mic'?'Microphone':'System output'} at ${this.clock(item.start)}. Use Play, then check the words.`; }
+      catch(error){this.notify(error.message);}finally{button.disabled=false;}
+    });
+    const remember=()=>this.drafts.set(item.id,{text:root.querySelector('#reference-text').value,verified:root.querySelector('#reference-verified').checked});
+    root.querySelector('#reference-text').addEventListener('input',()=>{root.querySelector('#reference-verified').checked=false;remember();});
+    root.querySelector('#reference-verified').addEventListener('change',remember);
+    root.querySelectorAll('[data-use-draft]').forEach(button=>button.addEventListener('click',()=>{root.querySelector('#reference-text').value=item.candidates[Number(button.dataset.useDraft)].text;root.querySelector('#reference-verified').checked=false;remember();}));
+    root.querySelector('#save-reference').addEventListener('click',async event=>{
+      const button=event.currentTarget;button.disabled=true;remember();
+      try {this.data=await (await this.api(`/api/local/sessions/${this.record.id}/evaluation/${item.id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(this.drafts.get(item.id))})).json();this.renderReview();const saved=document.createElement('p');saved.className='quality-explanation';saved.setAttribute('role','status');saved.textContent='Reference saved encrypted. Only checked references contribute to meeting accuracy.';root.querySelector('#save-reference').after(saved);}
+      catch(error){button.disabled=false;this.notify(error.message);}
+    });
+  }
+}

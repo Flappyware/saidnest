@@ -12,6 +12,9 @@ using Microsoft.Extensions.Logging;
 namespace SaidNest.Capture;
 
 sealed record LocalServerHandle(WebApplication App, string Token, string Origin);
+sealed record RefineRequest(string Model);
+sealed record RevisionRequest(string Id);
+sealed record ReferenceRequest(string Text,bool Verified);
 
 static class LocalServer
 {
@@ -23,7 +26,7 @@ static class LocalServer
         byte[] expected = Encoding.ASCII.GetBytes("Bearer " + token);
         var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions { Args = [], ApplicationName = typeof(LocalServer).Assembly.FullName });
         builder.Logging.ClearProviders();
-        builder.WebHost.ConfigureKestrel(server => { server.Listen(IPAddress.Loopback, port); server.Limits.MaxRequestBodySize = 1024; });
+        builder.WebHost.ConfigureKestrel(server => { server.Listen(IPAddress.Loopback, port); server.Limits.MaxRequestBodySize = 32768; });
         var app = builder.Build();
         var jobs = new SemaphoreSlim(1, 1);
         var audioGate = new SemaphoreSlim(1, 1);
@@ -63,10 +66,31 @@ static class LocalServer
             return new { id, state = inspection.State, session.StartedUtc, tracks = session.Tracks.Select(track => track.Id).ToArray(),
                 durationSeconds = diagnostic?.WallSeconds ?? Math.Max(0, (ChunkPump.QpcNow() - session.StartQpc100ns) / 10_000_000.0), events = diagnostic?.Events ?? [],
                 diagnosticFlags = diagnostic?.Tracks.SelectMany(track => track.Issues).ToArray() ?? [],
-                live = LiveTranscription.ReadStatus(vault, id), transcript = Transcription.Latest(vault, id) };
+                live = LiveTranscription.ReadStatus(vault, id), refinement=Transcription.ReadRefinement(vault,id), captureConditions=CaptureConditions.Read(vault,id), transcript = Transcription.Latest(vault, id) };
         }
-        app.MapGet("/api/local/health", () => Results.Json(new { local = true, fixture, model = "tiny.en (experimental)", language = "en" }));
+        app.MapGet("/api/local/health", () => Results.Json(new { local = true, fixture, model = "Local CUDA profiles, selected per job (experimental)", language = "en" }));
+        app.MapGet("/api/local/models",()=>Results.Json(ModelProfiles.Available(installFile)));
+        app.MapGet("/api/local/sessions/{id}/revisions",(string id)=>Results.Json(Transcription.Revisions(vault,id).Select(r=>new {r.Id,r.CreatedUtc,r.Kind,model=Transcription.Name(r),passages=r.Tracks.Sum(t=>t.Segments.Length),r.ParentRevisionId,r.WindowSeconds})));
+        app.MapPost("/api/local/sessions/{id}/revision",async(string id,HttpRequest request)=> {
+            if(Archive.IsRecording(vault,id)) return Results.Conflict();
+            var selection=await request.ReadFromJsonAsync<RevisionRequest>() ?? throw new ArgumentException("Select a revision.");
+            Transcription.Select(vault,id,selection.Id); return Results.Json(Summary(id));
+        });
+        app.MapPost("/api/local/sessions/{id}/refine",async(string id,HttpRequest request)=> {
+            if(ModelProfiles.Busy(vault)) return Results.Conflict();
+            var selection=await request.ReadFromJsonAsync<RefineRequest>() ?? throw new ArgumentException("Select a local model.");
+            string profile=ModelProfiles.Install(installFile,selection.Model);
+            if(!await jobs.WaitAsync(0)) return Results.Conflict();
+            try { await Transcription.Run(vault,id,profile,app.Lifetime.ApplicationStopping); return Results.Json(Summary(id)); }
+            finally { jobs.Release(); }
+        });
+        app.MapGet("/api/local/sessions/{id}/evaluation",(string id)=>Results.Json(Evaluation.Review(vault,id)));
+        app.MapPut("/api/local/sessions/{id}/evaluation/{caseId}",async(string id,string caseId,HttpRequest request)=> {
+            var reference=await request.ReadFromJsonAsync<ReferenceRequest>() ?? throw new ArgumentException("Enter a reference.");
+            Evaluation.SaveReference(vault,id,caseId,reference.Text,reference.Verified); return Results.Json(Evaluation.Review(vault,id));
+        });
         app.MapGet("/api/local/sessions/{id}/live", (string id) => Results.Json(LiveTranscription.ReadStatus(vault, id)));
+        app.MapGet("/api/local/sessions/{id}/progress",(string id)=>Results.Json(new {refinement=Transcription.ReadRefinement(vault,id),transcript=Transcription.Latest(vault,id)}));
         app.MapPost("/api/local/sessions/{id}/stop", (string id) => {
             if (!Archive.IsRecording(vault, id)) return Results.Conflict();
             if (!File.Exists(Path.Combine(vault.SessionPath(id), "stop-request.sne"))) vault.Write($"sessions/{id}/stop-request.sne", new { kind = "stop-request", qpc100ns = ChunkPump.QpcNow() });
@@ -78,6 +102,7 @@ static class LocalServer
         app.MapGet("/api/local/sessions/{id}", (string id) => Results.Json(Summary(id)));
         app.MapPost("/api/local/sessions/{id}/transcribe", async (string id) =>
         {
+            if(ModelProfiles.Busy(vault)) return Results.Conflict();
             _ = vault.SessionPath(id);
             if (!await jobs.WaitAsync(0)) return Results.Conflict(new { error = "A local transcription job is already running." });
             try { await Transcription.Run(vault, id, installFile, app.Lifetime.ApplicationStopping); return Results.Json(Summary(id)); }
@@ -101,7 +126,7 @@ static class LocalServer
         });
         app.MapGet("/api/local/sessions/{id}/diagnostics", (string id) => Results.Json(Diagnostics.Analyze(vault, id)));
         var assets = new Dictionary<string, (string File, string Mime)> {
-            ["/styles.css"] = ("styles.css", "text/css"), ["/local.js"] = ("local.js", "application/javascript"), ["/favicon.svg"] = ("favicon.svg", "image/svg+xml") };
+            ["/styles.css"] = ("styles.css", "text/css"), ["/local.js"] = ("local.js", "application/javascript"), ["/local-quality.js"]=("local-quality.js","application/javascript"), ["/favicon.svg"] = ("favicon.svg", "image/svg+xml") };
         foreach (var asset in assets)
             app.MapGet(asset.Key, async () => Results.Bytes(await File.ReadAllBytesAsync(Path.Combine(publicRoot, asset.Value.File)), asset.Value.Mime));
         async Task<IResult> Page()

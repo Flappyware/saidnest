@@ -1,0 +1,9 @@
+{
+  "revision": "5359861c739e955e79d9a303bcbc70fb988958b1",
+  "models": [
+    {"name":"tiny.en","file":"ggml-tiny.en.bin","bytes":77704715,"sha256":"921e4cf8686fdd993dcd081a5da5b6c365bfde1162e72b08d75ac75289920b1f"},
+    {"name":"small.en","file":"ggml-small.en.bin","bytes":487614201,"sha256":"c6138d6d58ecc8322097e0f987c32f1be8bb0a18532a3f88f734d1bbf9c41e5d"},
+    {"name":"large-v3-turbo","file":"ggml-large-v3-turbo.bin","bytes":1624555275,"sha256":"1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69"},
+    {"name":"large-v3","file":"ggml-large-v3.bin","bytes":3095033483,"sha256":"64d182b440b98d5203c4f9bd541544d84c605196c4f7b845dfa11fb23594d1e2"}
+  ]
+}

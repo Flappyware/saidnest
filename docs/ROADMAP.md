@@ -28,6 +28,8 @@ Gate: recording and saved audio survive an application/repository restart, infer
 
 ## Local alpha
 
+The development slice now supports selected live and refinement models, immutable transcript versions, frozen multi-model comparisons, and encrypted owner-checked references for WER. Timings, model disagreement, synthetic smoke accuracy, and checked meeting accuracy are separate evidence. See [model evaluation](MODEL_EVALUATION.md). A persistent worker, representative references, and a supervised larger-model live trial remain qualification gates; [WhisperX alignment/diarization](SPEAKR_REVIEW.md) is a later optional pass.
+
 Status: Planned; builds on the first Windows slice.
 
 Add the repository API, search, audio-linked playback, human corrections, export, retention, clean-machine installation, offline model provisioning, and verified backup/key restoration. Define update authenticity and rollback before distribution. Keep capture, delivery, and transcription states distinct.

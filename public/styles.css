@@ -163,6 +163,32 @@ mark { color: var(--ink); background: var(--highlight); border-radius: 2px; }
 .local-player > p { grid-column: 1 / -1; }
 .recording-diagnostics { margin-top: 16px; }
 .local-model-note { margin: -8px 0 24px; }
+.quality-tools { margin: 24px 0 32px; }
+.revision-controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
+.revision-controls label { display: grid; gap: 6px; font-size: 14px; flex: 1 1 180px; min-width: 0; }
+.quality-tools select, .quality-tools textarea { background: var(--white); border: 1px solid var(--control); border-radius: 6px; min-height: 44px; padding: 8px; color: var(--ink); font: inherit; max-width: 100%; }
+.quality-explanation, .refinement-progress { font-size: 13px; color: var(--muted); line-height: 1.6; margin: 12px 0 20px; }
+.quality-review { margin-top: 32px; }
+.quality-heading { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; }
+.quality-heading h3 { font-size: 20px; margin: 0; }
+.quality-heading h4 { font-size: 16px; margin: 0; }
+.quality-table-scroll { overflow-x: auto; max-width: 100%; margin: 24px 0; }
+.quality-review table { border-collapse: collapse; font-size: 13px; width: 100%; min-width: 720px; }
+.quality-review caption { text-align: left; color: var(--muted); margin-bottom: 12px; }
+.quality-review th, .quality-review td { padding: 10px 12px; text-align: right; font-variant-numeric: tabular-nums; vertical-align: top; }
+.quality-review th:first-child { text-align: left; padding-left: 0; white-space: nowrap; position: sticky; left: 0; background: var(--white); }
+.quality-review thead th { font-weight: 400; color: var(--muted); }
+.quality-review tbody th { font-weight: 500; }
+.quality-review > label { display: block; margin: 20px 0 8px; }
+.quality-review > select, .quality-review textarea { width: 100%; }
+.quality-review > audio { display: block; width: 100%; margin-top: 16px; }
+.quality-review #load-review-audio { margin-top: 12px; }
+.quality-review #review-audio-note { font-size: 13px; color: var(--muted); }
+.quality-candidates article { margin-block: 24px; }
+.quality-candidates article > p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.quality-review .reference-check { display: flex; gap: 10px; align-items: center; min-height: 44px; }
+.quality-review .button.small { min-height: 44px; }
+.score-scope { display: grid; gap: 6px; max-width: 240px; font-size: 14px; margin-top: 20px; }
 .local-live-progress { font-size: 14px; line-height: 1.6; margin: 16px 0; }
 #audio-window { grid-column: 1 / -1; }
 .seek-passage { border: 0; background: transparent; padding: 5px 0; align-self: start; min-height: 32px; text-decoration: underline; text-underline-offset: 4px; }
