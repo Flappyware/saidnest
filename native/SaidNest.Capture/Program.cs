@@ -22,8 +22,14 @@ static class Program
             if (command == "init")
             {
                 Console.WriteLine("Create a local encrypted vault. Keep a backup of vault.json and the archive, plus your recovery passphrase separately.");
-                string password = Password("Recovery passphrase (12+ characters): ");
-                if (password != Password("Confirm passphrase: ")) throw new ArgumentException("Passphrases do not match.");
+                string password;
+                while (true)
+                {
+                    password = Password("Recovery passphrase (12+ characters; Esc cancels): ");
+                    if (password.Length < 12) { Console.WriteLine("Use at least 12 characters. Please try again."); continue; }
+                    if (password == Password("Confirm passphrase: ")) break;
+                    Console.WriteLine("The two entries differed. Nothing was saved or recorded. Please try again.");
+                }
                 using var created = Vault.Create(root, password);
                 Console.WriteLine("Vault created. Automatic local unlock is restricted to this Windows account; recovery works with your passphrase.");
                 return 0;
@@ -103,8 +109,9 @@ static class Program
         {
             var key = Console.ReadKey(intercept: true);
             if (key.Key == ConsoleKey.Enter) break;
-            if (key.Key == ConsoleKey.Backspace) { if (value.Length > 0) value.Length--; }
-            else if (!char.IsControl(key.KeyChar)) value.Append(key.KeyChar);
+            if (key.Key == ConsoleKey.Escape) throw new OperationCanceledException("Vault setup cancelled; recording has not started.");
+            if (key.Key == ConsoleKey.Backspace) { if (value.Length > 0) { value.Length--; Console.Write("\b \b"); } }
+            else if (!char.IsControl(key.KeyChar)) { value.Append(key.KeyChar); Console.Write('*'); }
         }
         Console.WriteLine();
         return value.ToString();
