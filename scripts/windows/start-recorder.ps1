@@ -1,4 +1,4 @@
-param([int]$Seconds = 600, [string]$MicrophoneName, [switch]$UseDefaultOutput)
+param([int]$Seconds = 600, [string]$MicrophoneName, [switch]$UseDefaultOutput, [string]$OutputId, [switch]$Live)
 $ErrorActionPreference = 'Stop'
 $captureRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 Set-Location -LiteralPath $captureRoot
@@ -30,7 +30,11 @@ if ($MicrophoneName) {
     if ($preferredMics.Count -ne 1) { throw 'The requested microphone name must match exactly one active device.' }
     $captureMic = $preferredMics[0].id
 } else { $captureMic = Select-CaptureSource 'mic' }
-if ($UseDefaultOutput) {
+if ($OutputId) {
+    $selectedOutputs = @($captureDevices | Where-Object { $_.kind -eq 'output' -and $_.id -eq $OutputId })
+    if ($selectedOutputs.Count -ne 1) { throw 'The selected output endpoint is not active.' }
+    $captureOutput = $selectedOutputs[0].id
+} elseif ($UseDefaultOutput) {
     $preferredOutputs = @($captureDevices | Where-Object { $_.kind -eq 'output' -and $_.isDefault })
     if ($preferredOutputs.Count -ne 1) { throw 'No unique default output is available.' }
     $captureOutput = $preferredOutputs[0].id
@@ -42,6 +46,10 @@ if (-not (Test-Path -LiteralPath '.saidnest/vault/vault.json')) {
     if ($LASTEXITCODE -ne 0) { throw 'Vault setup did not finish; recording has not started.' }
 }
 $captureArguments = @('record', '--seconds', "$Seconds")
+if ($Live) {
+    if (-not (Test-Path -LiteralPath '.saidnest/inference/install.json')) { throw 'Provision the local model with scripts/windows/provision-whisper.ps1 before choosing live transcription.' }
+    $captureArguments += '--live'
+}
 if ($captureMic) { $captureArguments += @('--mic', $captureMic) }
 if ($captureOutput) { $captureArguments += @('--output', $captureOutput) }
 Write-Host "`nRecording starts now. P pauses/resumes. Q stops. Audio stays in the local encrypted vault."

@@ -1,6 +1,6 @@
 # Windows recording prototype
 
-Development prototype, October 28, 2026. The deployed website remains a fictional preview. The separate Windows executable now connects saved recordings to experimental local transcription and an authenticated local timeline.
+Development prototype, October 28, 2026. The deployed website remains a fictional preview. The separate Windows executable now supports rolling real-time transcription during capture, encrypted saved transcripts, and an authenticated local timeline.
 
 ## Start recording locally
 
@@ -22,9 +22,9 @@ After recording, double-click `Start-Local-SaidNest.cmd`, or run `./scripts/wind
 
 During development the agent may open the same service in the background. `Stop-Local-SaidNest.cmd` stops that tracked process after checking its executable and start time; it does not stop capture or delete recordings. For foreground launches, use Ctrl+C in the launch window. The prototype catalog loads the 100 most recently updated recordings; search is limited to records loaded in this tab.
 
-Select a recording and source, play saved audio, or choose **Transcribe locally**. Search scans transcript text loaded into this tab. Timestamp buttons seek the selected source; copy and text download include recording and timestamp context. **Refresh recordings** reloads the archive after a new capture stops. Transcription runs after capture, independently of its writer; it is not live meeting transcription. The experimental `tiny.en` model is English-only and this worker requires CUDA. Provision it first using `./scripts/windows/provision-whisper.ps1`; missing dependencies fail locally without switching processing destination.
+Select a recording and source, play saved audio, or choose **Transcribe locally**. Search scans transcript text loaded into this tab. Timestamp buttons seek the selected source; copy and text download include recording and timestamp context. **Refresh recordings** discovers new captures. The live path below transcribes committed chunks during capture; the record-only path can transcribe afterward. Both run independently of the audio writer. The experimental `tiny.en` model is English-only and requires CUDA. Provision it first using `./scripts/windows/provision-whisper.ps1`; missing dependencies fail locally without switching processing destination.
 
-The adapter decrypts each source to an in-memory 48kHz mono PCM16 WAV, downmixing stereo for playback/inference. Original float32 source tracks remain unchanged. It inserts silence at saved clock gaps, including manual pauses, so passage times remain relative to recording start. Playback and inference currently accept stopped recordings up to **ten minutes**, while recording itself permits one hour. Playback supports intact interrupted sessions; inference requires a verified final manifest. Invalid hardware timestamps block aligned playback. Longer sessions need a bounded streaming adapter before local-alpha qualification.
+The adapter decrypts each source to in-memory 48kHz mono PCM16, downmixing stereo for playback/inference. Original float32 source tracks remain unchanged. It inserts silence at clock gaps, including manual pauses, so passage times remain relative to recording start. Whole-recording retranscription and the original CLI player remain capped at **ten minutes**. Browser playback now requests bounded sixty-second windows, while live inference uses eight-second windows. These paths support the recorder duration limit of one hour without allocating a whole-meeting WAV; hour-long reliability remains unqualified. Playback supports intact interrupted sessions; post-capture inference requires a verified final manifest. Invalid hardware timestamps block aligned playback. Browser playback is disabled during capture to keep its own audio out of the recording.
 
 Inference sends WAV bytes through the pinned CLI's standard input and reads segment output in memory; it writes no decrypted intermediate WAV or transcript JSON. Validated segments are stored as new immutable encrypted `.snt` revisions with model/runtime provenance. Known non-speech markers and invalid segment ranges are discarded; this is not a speech detector or a recognition-quality guarantee. An explicit low-signal threshold can skip inference while retaining audio; it is not proof that no speech occurred. The interface shows the latest revision; revision browsing and corrections remain planned.
 
@@ -95,9 +95,27 @@ The standard-library Python benchmark runs the same generated speech/silence inp
 1. Extend short owner-recording evidence to representative two-source speech and interruption feedback. A short local capture, pause/resume, playback, and encrypted transcript/timeline path now work; system output speech quality is not established.
 2. Test a 60-minute meeting, driver/device failures, sleep/resume, disk pressure, queue saturation, and forced shutdown while audio is arriving; measure drift and retained/lost boundaries.
 3. Build a permitted, annotated meeting corpus and compare the planned streaming engine with portable Whisper recognition. Select a model only after quality, silence, memory, provisional latency, finalization and concurrent-source measurements.
-4. Replace the pinned post-capture CLI adapter with a versioned worker contract and bounded long-session/streaming processing. Add revision browsing, corrections, indexed search, installation, and backup restoration. The cloud preview remains synthetic; real archives are accessed through the local service.
+4. Replace the rolling CLI adapter with a persistent versioned streaming worker, stabilize word boundaries, and qualify hour-long processing. Add revision browsing, corrections, indexed search, installation, and backup restoration. The cloud preview remains synthetic; real archives are accessed through the local service.
 
 The implementation uses Microsoft's [WASAPI loopback](https://learn.microsoft.com/en-us/windows/win32/coreaudio/loopback-recording), NAudio's [recorder API](https://github.com/naudio/NAudio/blob/v3.3.0/src/NAudio.Wasapi/WasapiRecorder.cs), and Windows [DPAPI](https://learn.microsoft.com/en-us/dotnet/api/system.security.cryptography.protecteddata?view=net-10.0). These references document underlying APIs, not a security assessment of this prototype.
 
 
 The `integration-test` command uses synthetic PCM and fictional text to verify pause-aligned WAV output, discontinuity correlation, timestamp bounds, API/audio authorization, cross-origin denial, Host validation, no-store responses, and denial of static vault files. It runs in Windows CI. `serve-fixture` opens a synthetic archive for UI checks; keep private recordings out of browser automation and screenshots.
+
+## Real-time transcription during recording
+
+Double-click `Start-Live-SaidNest.cmd`, or run:
+
+```powershell
+./scripts/windows/start-recorder.ps1 -Live -Seconds 900
+```
+
+Choose the BRIO or another input and the actual output used by the meeting application. Windows default and app-specific routing can differ, and identical monitor names can refer to different endpoints. `output-activity` reads endpoint levels and Discord session counts without saving audio; `-OutputId DEVICE_ID` selects an exact endpoint instead of `-UseDefaultOutput`. Sources never switch automatically during capture.
+
+Open the local timeline and select the active recording. It refreshes that recording about every two seconds, showing separate source progress, activity, draft labels, and a **Stop recording** button. Stops are authenticated local requests. Audio finishes saving before inference drains. `live-status --session SESSION_ID` prints timing and counts without transcript text; `stop-recording --session SESSION_ID` is a console stop alternative. `open` reopens the running private timeline without printing its key. Refresh recordings discovers newly started captures when no active recording is being followed.
+
+The worker tails authenticated committed chunks, holds a single inference lease, and runs separately from WASAPI callbacks and the persistence queue. It decodes a four-second draft, then replaces that draft with a finalized eight-second window. Each source has its own windows and timestamps. Sources are processed sequentially. A model failure preserves recording and committed text; backlog stays in saved audio rather than an unbounded RAM queue. On stop it allows up to 90 seconds to drain, then cancels inference while retaining the archive.
+
+This is rolling batch real-time recognition using the pinned English CUDA CLI, with a fresh model process per decode. It is not token-by-token streaming. Expect roughly four seconds plus persistence, decode, and browser refresh before provisional text, or eight seconds plus those costs for final windows. Fixed boundaries can split words, miss context, or duplicate recognized wording across adjacent windows. There is no echo cancellation, diarization, qualified VAD, automatic source recovery, or measured recognition-accuracy claim. Original audio remains available for correction/reprocessing. Quiet audio is retained even when no words are inferred.
+
+Draft/final parts are immutable encrypted objects; an atomically replaced encrypted checkpoint records model provenance and per-source progress. The final encrypted transcript revision is committed before reporting inference complete. Crashed-worker parts remain recoverable, but automatic worker resume/checkpoint replay and revision browsing are planned. Copying live text marks it provisional. The optional `measure-live.ps1` writes only progress/timing and recorder-process memory/CPU samples under ignored `.saidnest/`; these exclude the model subprocess and are not whole-application peak-memory measurements.

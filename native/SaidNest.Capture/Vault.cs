@@ -100,7 +100,7 @@ sealed class Vault : IDisposable
         return full;
     }
 
-    public string Write(string relative, object metadata, ReadOnlySpan<byte> audio = default)
+    public string Write(string relative, object metadata, ReadOnlySpan<byte> audio = default, bool replace = false)
     {
         byte[] header = JsonSerializer.SerializeToUtf8Bytes(metadata, Json);
         if (header.Length > MaxMetadataBytes || audio.Length > 2 * 1024 * 1024) throw new InvalidDataException("Archive object exceeds prototype limits.");
@@ -111,15 +111,22 @@ sealed class Vault : IDisposable
         byte[] encrypted;
         try { encrypted = Seal(payload, key, Encoding.UTF8.GetBytes(OwnerId + ":" + relative.Replace('\\', '/'))); }
         finally { CryptographicOperations.ZeroMemory(payload); }
-        AtomicWrite(Resolve(relative), encrypted);
+        AtomicWrite(Resolve(relative), encrypted, replace);
         return Convert.ToHexString(SHA256.HashData(encrypted)).ToLowerInvariant();
     }
+
+    public void Replace(string relative, object metadata) => Write(relative, metadata, replace: true);
 
     public (JsonElement Metadata, byte[] Audio, string Hash) Read(string relative)
     {
         string path = Resolve(relative);
         if (new FileInfo(path).Length > MaxObjectBytes) throw new InvalidDataException("Oversized archive object.");
-        byte[] encrypted = File.ReadAllBytes(path);
+        byte[] encrypted;
+        using (var input = new FileStream(path,FileMode.Open,FileAccess.Read,FileShare.Read | FileShare.Delete))
+        {
+            encrypted = new byte[checked((int)input.Length)];
+            input.ReadExactly(encrypted);
+        }
         byte[] plain = Unseal(encrypted, key, Encoding.UTF8.GetBytes(OwnerId + ":" + relative.Replace('\\', '/')));
         try
         {

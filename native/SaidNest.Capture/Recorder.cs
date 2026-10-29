@@ -19,6 +19,25 @@ sealed class CaptureTrack(TrackInfo info, WasapiRecorder recorder, MMDevice? dev
 
 static class Recorder
 {
+    public static async Task<object[]> OutputActivity()
+    {
+        using var enumerator = new MMDeviceEnumerator();
+        using var devices = enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active);
+        var results = new List<object>();
+        foreach (var device in devices)
+        {
+            using (device)
+            {
+                float peak = 0;
+                for (int sample = 0; sample < 10; sample++) { peak = Math.Max(peak, device.AudioMeterInformation.MasterPeakValue); await Task.Delay(50); }
+                int? discord = null;
+                try { discord=EndpointSessions.DiscordCount(device.ID); }
+                catch (System.Runtime.InteropServices.COMException) { }
+                results.Add(new { device.ID, name=device.FriendlyName, peakDbfs=20*Math.Log10(Math.Max(peak,1e-10)), discordSessions=discord });
+            }
+        }
+        return results.ToArray();
+    }
     public static async Task<object> Probe(string selection)
     {
         using var track = CreateTrack("mic", selection);
@@ -76,7 +95,7 @@ static class Recorder
         catch { device.Dispose(); throw; }
     }
 
-    public static async Task<Inspection> Record(Vault vault, string? mic, string? output, int seconds, bool testProcess = false)
+    public static async Task<Inspection> Record(Vault vault, string? mic, string? output, int seconds, bool testProcess = false, string? liveInstall = null)
     {
         if (seconds is < 1 or > 3600) throw new ArgumentException("Prototype duration must be 1–3600 seconds.");
         List<CaptureTrack> tracks = [];
@@ -97,8 +116,9 @@ static class Recorder
         }
         if (tracks.Count == 0) throw new ArgumentException("Select at least one source explicitly.");
         var session = new SessionInfo(1, Guid.NewGuid().ToString("N"), DateTimeOffset.UtcNow, ChunkPump.QpcNow(), Stopwatch.Frequency,
-            "recording", "not-configured", tracks.Select(track => track.Info).ToArray());
+            "recording", liveInstall == null ? "not-configured" : "live-local-english", tracks.Select(track => track.Info).ToArray());
         ChunkPump? pump = null;
+        LiveTranscription? live = null;
         int paused = 0, stopping = 0, cancelled = 0;
         string? error = null;
         int eventSequence = 0;
@@ -107,6 +127,7 @@ static class Recorder
         try
         {
             pump = new ChunkPump(vault, session);
+            if (liveInstall != null) { live = new(vault, session, liveInstall); live.Start(); }
             foreach (var track in tracks)
             {
                 track.Recorder.DataAvailable += (buffer, flags, position, qpc) =>
@@ -133,7 +154,7 @@ static class Recorder
                     track.Stopped.TrySetResult();
                 };
             }
-            Console.WriteLine($"Recording session {session.Id}. Local encrypted storage only. Inference: not configured.");
+            Console.WriteLine($"Recording session {session.Id}. Local encrypted storage only. Inference: {(live == null ? "not configured" : "live local English; audio persistence is independent")}.");
             foreach (var track in tracks) Console.WriteLine($"  {track.Info.Id}: {track.Info.Name}");
             Console.WriteLine("P pauses/resumes; Q or Ctrl+C stops. Fixed duration also stops recording.");
             Console.CancelKeyPress += cancel;
@@ -144,6 +165,10 @@ static class Recorder
             var clock = Stopwatch.StartNew();
             while (clock.Elapsed.TotalSeconds < seconds && Volatile.Read(ref cancelled) == 0 && Volatile.Read(ref error) == null && pump.Failure == null)
             {
+                if (File.Exists(Path.Combine(vault.SessionPath(session.Id), "stop-request.sne")))
+                {
+                    if (vault.Read($"sessions/{session.Id}/stop-request.sne").Metadata.GetProperty("kind").GetString() == "stop-request") break;
+                }
                 if (!Console.IsInputRedirected && Console.KeyAvailable)
                 {
                     var key = Console.ReadKey(intercept: true).Key;
@@ -158,6 +183,7 @@ static class Recorder
                     Console.Write($"| {track.Info.Id} {level} ");
                 }
                 Console.Write($"| queued {pump.QueuedBytes / 1024} KiB    ");
+                if (live != null) Console.Write($"| text {live.Status.State} {live.Status.Tracks.Sum(t => t.FinalPassages)} saved passages    ");
                 await Task.Delay(500);
             }
             player?.Stop();
@@ -183,7 +209,8 @@ static class Recorder
         foreach (var track in tracks)
             vault.Write($"sessions/{session.Id}/{track.Info.Id}-stats.snm", new { track.Bytes, track.Discontinuities, track.TimestampErrors });
         Event(error == null ? "capture-stopped" : "capture-interrupted");
-        await pump.Finish(error ?? "User stop or fixed duration elapsed.", error == null);
+        try { await pump.Finish(error ?? "User stop or fixed duration elapsed.", error == null); }
+        finally { if (live != null) { await live.Finish(); Console.WriteLine($"Local live transcription: {live.Status.State}. {live.Status.Tracks.Sum(t => t.FinalPassages)} saved passages. No text is printed to logs."); } }
         var inspection = Archive.Inspect(vault, session.Id);
         Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(inspection, Vault.Json));
         if (testProcess && tracks.Sum(track => track.Bytes) == 0) throw new IOException("Loopback test received no audio; capture path is not validated.");

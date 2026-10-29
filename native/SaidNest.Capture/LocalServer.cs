@@ -55,19 +55,27 @@ static class LocalServer
 
         object Summary(string id)
         {
-            var inspection = Archive.Inspect(vault, id);
+            bool active = Archive.IsRecording(vault, id);
+            var inspection = active ? new Inspection(id, "recording", 0, 0, 0, []) : Archive.Inspect(vault, id);
             if (inspection.State == "corrupt") return new { id, state = "corrupt", error = "Archive verification failed." };
             var session = Archive.ReadSession(vault, id);
             var diagnostic = inspection.State == "recording" ? null : Diagnostics.Analyze(vault, id);
             return new { id, state = inspection.State, session.StartedUtc, tracks = session.Tracks.Select(track => track.Id).ToArray(),
-                durationSeconds = diagnostic?.WallSeconds ?? 0, events = diagnostic?.Events ?? [],
+                durationSeconds = diagnostic?.WallSeconds ?? Math.Max(0, (ChunkPump.QpcNow() - session.StartQpc100ns) / 10_000_000.0), events = diagnostic?.Events ?? [],
                 diagnosticFlags = diagnostic?.Tracks.SelectMany(track => track.Issues).ToArray() ?? [],
-                transcript = Transcription.Latest(vault, id) };
+                live = LiveTranscription.ReadStatus(vault, id), transcript = Transcription.Latest(vault, id) };
         }
         app.MapGet("/api/local/health", () => Results.Json(new { local = true, fixture, model = "tiny.en (experimental)", language = "en" }));
+        app.MapGet("/api/local/sessions/{id}/live", (string id) => Results.Json(LiveTranscription.ReadStatus(vault, id)));
+        app.MapPost("/api/local/sessions/{id}/stop", (string id) => {
+            if (!Archive.IsRecording(vault, id)) return Results.Conflict();
+            if (!File.Exists(Path.Combine(vault.SessionPath(id), "stop-request.sne"))) vault.Write($"sessions/{id}/stop-request.sne", new { kind = "stop-request", qpc100ns = ChunkPump.QpcNow() });
+            return Results.Accepted();
+        });
         app.MapGet("/api/local/sessions", () => Results.Json(Directory.GetDirectories(Path.Combine(vault.Root, "sessions"))
             .Where(path => Guid.TryParseExact(Path.GetFileName(path), "N", out _)).OrderByDescending(Directory.GetLastWriteTimeUtc)
             .Take(100).Select(path => Summary(Path.GetFileName(path))).ToArray()));
+        app.MapGet("/api/local/sessions/{id}", (string id) => Results.Json(Summary(id)));
         app.MapPost("/api/local/sessions/{id}/transcribe", async (string id) =>
         {
             _ = vault.SessionPath(id);
@@ -75,11 +83,20 @@ static class LocalServer
             try { await Transcription.Run(vault, id, installFile, app.Lifetime.ApplicationStopping); return Results.Json(Summary(id)); }
             finally { jobs.Release(); }
         });
-        app.MapGet("/api/local/sessions/{id}/audio/{track}", async (string id, string track) =>
+        app.MapGet("/api/local/sessions/{id}/audio/{track}", async (string id, string track, double? start, double? seconds) =>
         {
             if (track is not ("mic" or "output")) return Results.BadRequest();
             if (!await audioGate.WaitAsync(0)) return Results.Conflict();
-            try { return Results.Bytes(TimelineAudio.Render(vault, id, track).Wav, "audio/wav"); }
+            try {
+                if (start == null && seconds == null) return Results.Bytes(TimelineAudio.Render(vault, id, track).Wav, "audio/wav");
+                if (!double.IsFinite(start ?? 0) || (start ?? 0)<0 || !double.IsFinite(seconds ?? 60) || (seconds ?? 60)<=0 || (seconds ?? 60)>60) throw new ArgumentException("Select a valid playback window of up to sixty seconds.");
+                var inspection = Archive.Inspect(vault, id);
+                if (inspection.State is "corrupt" or "recording") return Results.Conflict();
+                var session = Archive.ReadSession(vault, id);
+                var windows = new AudioWindows(vault, session, session.Tracks.Single(t => t.Id == track)); windows.Poll();
+                double begin = start ?? 0, duration = Math.Min(seconds ?? 60, windows.Available - begin);
+                return Results.Bytes(windows.Render(begin, duration).Wav, "audio/wav");
+            }
             finally { audioGate.Release(); }
         });
         app.MapGet("/api/local/sessions/{id}/diagnostics", (string id) => Results.Json(Diagnostics.Analyze(vault, id)));

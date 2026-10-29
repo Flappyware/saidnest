@@ -18,8 +18,11 @@ static partial class Transcription
 
     public static TranscriptRevision? Latest(Vault vault, string id)
     {
+        var live = LiveTranscription.ReadTranscript(vault, id);
         var path = Directory.GetFiles(vault.SessionPath(id), "transcript-*.snt").OrderDescending(StringComparer.Ordinal).FirstOrDefault();
-        return path == null ? null : vault.Read($"sessions/{id}/{Path.GetFileName(path)}").Metadata.Deserialize<TranscriptRevision>(Vault.Json);
+        var saved = path == null ? null : vault.Read($"sessions/{id}/{Path.GetFileName(path)}").Metadata.Deserialize<TranscriptRevision>(Vault.Json);
+        var status = LiveTranscription.ReadStatus(vault,id);
+        return live != null && (status?.State != "failed" || saved == null || saved.CreatedUtc <= status.UpdatedUtc) ? live : saved;
     }
 
     public static TranscriptSegment[] Parse(string text, string track, double duration, out int rejected)
@@ -42,23 +45,39 @@ static partial class Transcription
     {
         if (Archive.Inspect(vault, id).State != "complete") throw new InvalidDataException("Transcription currently requires a finalized, verified recording.");
         using var lease = new FileStream(Path.Combine(vault.Root, "inference.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
-        var install = JsonSerializer.Deserialize<EngineInstall>(await File.ReadAllBytesAsync(installFile, cancellationToken), Vault.Json) ?? throw new InvalidDataException("Missing inference settings.");
-        if (!File.Exists(install.Executable)) throw new FileNotFoundException("Provision the local inference runtime first.");
-        await using (var model = File.OpenRead(install.Model))
-            if (!string.Equals(Convert.ToHexString(await SHA256.HashDataAsync(model, cancellationToken)), install.ModelSha256, StringComparison.OrdinalIgnoreCase))
-                throw new CryptographicException("Local model checksum does not match its provisioned revision.");
+        var install = await Load(installFile, cancellationToken);
         List<TrackTranscript> tracks = [];
         var session = Archive.ReadSession(vault, id);
         foreach (var track in session.Tracks)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var audio = TimelineAudio.Render(vault, id, track.Id);
+            tracks.Add(await Decode(install, TimelineAudio.Render(vault, id, track.Id), track.Id, cancellationToken));
+        }
+        var revision = new TranscriptRevision(1, Guid.NewGuid().ToString("N"), id, DateTimeOffset.UtcNow, $"whisper.cpp {install.RuntimeBuild} CUDA", install.ModelSha256, install.ModelRevision, "en", tracks.ToArray());
+        string file = $"transcript-{revision.CreatedUtc:yyyyMMddTHHmmssfffffffZ}-{revision.Id}.snt";
+        vault.Write($"sessions/{id}/{file}", revision);
+        return revision;
+    }
+
+    public static async Task<EngineInstall> Load(string installFile, CancellationToken cancellationToken = default)
+    {
+        var install = JsonSerializer.Deserialize<EngineInstall>(await File.ReadAllBytesAsync(installFile, cancellationToken), Vault.Json) ?? throw new InvalidDataException("Missing inference settings.");
+        if (!File.Exists(install.Executable)) throw new FileNotFoundException("Provision the local inference runtime first.");
+        await using (var model = File.OpenRead(install.Model))
+            if (!string.Equals(Convert.ToHexString(await SHA256.HashDataAsync(model, cancellationToken)), install.ModelSha256, StringComparison.OrdinalIgnoreCase))
+                throw new CryptographicException("Local model checksum does not match its provisioned revision.");
+        return install;
+    }
+
+    public static async Task<TrackTranscript> Decode(EngineInstall install, RenderedAudio audio, string trackId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
             // Keep quiet audio, but do not turn a low-level signal into a confident speech claim.
             if (audio.RmsDbfs < -60 && audio.PeakDbfs < -45)
             {
-                tracks.Add(new(track.Id, "too-quiet", audio.DurationSeconds, "Signal is below this prototype's analysis threshold. Audio is retained; no transcript was inferred.", []));
-                CryptographicOperations.ZeroMemory(audio.Wav);
-                continue;
+                return new(trackId, "too-quiet", audio.DurationSeconds, "Signal is below this prototype's analysis threshold. Audio is retained; no transcript was inferred.", []);
             }
             var settings = new ProcessStartInfo(install.Executable)
             {
@@ -84,9 +103,9 @@ static partial class Transcription
                 string backendLog = await stderr;
                 if (process.ExitCode != 0) throw new IOException("Local inference failed; no transcript revision was committed.");
                 if (!backendLog.Contains("using CUDA", StringComparison.Ordinal)) throw new IOException("CUDA execution was not established; no silent backend switch is allowed in this worker.");
-                var segments = Parse(output, track.Id, audio.DurationSeconds, out int rejected);
-                tracks.Add(new(track.Id, segments.Length > 0 ? "transcribed" : "no-text", audio.DurationSeconds,
-                    rejected > 0 ? $"{rejected} invalid timestamp segments were rejected. Review this experimental transcript." : "Experimental tiny English model. Check important words against the audio.", segments));
+                var segments = Parse(output, trackId, audio.DurationSeconds, out int rejected);
+                return new(trackId, segments.Length > 0 ? "transcribed" : "no-text", audio.DurationSeconds,
+                    rejected > 0 ? $"{rejected} invalid timestamp segments were rejected. Review this experimental transcript." : "Experimental tiny English model. Check important words against the audio.", segments);
             }
             catch
             {
@@ -94,12 +113,8 @@ static partial class Transcription
                 await process.WaitForExitAsync(CancellationToken.None);
                 throw;
             }
-            finally { CryptographicOperations.ZeroMemory(audio.Wav); }
         }
-        var revision = new TranscriptRevision(1, Guid.NewGuid().ToString("N"), id, DateTimeOffset.UtcNow, $"whisper.cpp {install.RuntimeBuild} CUDA", install.ModelSha256, install.ModelRevision, "en", tracks.ToArray());
-        string file = $"transcript-{revision.CreatedUtc:yyyyMMddTHHmmssfffffffZ}-{revision.Id}.snt";
-        vault.Write($"sessions/{id}/{file}", revision);
-        return revision;
+        finally { CryptographicOperations.ZeroMemory(audio.Wav); }
     }
 
     static async Task<string> ReadLimited(StreamReader reader, int limit, CancellationToken token)

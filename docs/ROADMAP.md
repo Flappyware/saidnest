@@ -10,11 +10,11 @@ The website and interactive timeline contain fictional sample recordings. Search
 
 ## First Windows implementation
 
-Status: In progress; short recording → encrypted transcript → local timeline slice works, local-alpha gates still open.
+Status: In progress; recording → rolling live text → encrypted transcript → local timeline slice works, local-alpha gates still open.
 
 The [Windows prototype](WINDOWS_PROTOTYPE.md) has a native command-line capture path, encrypted chunk store, passphrase/account key wrappers, source meters, explicit pause/stop controls, inspection, and WAV export. Synthetic storage, corruption, overload, and forced-process-exit checks passed locally. A generated-tone process-loopback smoke test and a selected microphone level probe passed; this does not establish real duplex meeting reliability. An initial English synthetic corpus and pinned Whisper CPU/CUDA smoke benchmark exist. Production model selection and representative streaming/meeting measurements remain open.
 
-Stopped recordings up to ten minutes now support in-memory pause-aligned playback, experimental tiny English CUDA inference, encrypted transcript revisions, and an authenticated loopback-only browser timeline. Search, source selection, timestamp seeking, and copy/text export use saved records. Synthetic integration tests cover pause timing and API boundaries. A short owner recording validates this development path; recognition quality, hour-long playback, streaming inference, packaging, remote access, and long-session reliability remain qualification work. The cloud preview continues to use fictional data.
+Recordings now support in-memory pause-aligned playback, experimental tiny English CUDA rolling inference, encrypted draft/final transcript parts, and an authenticated loopback-only browser timeline. Search, source selection, timestamp seeking, and copy/text export use saved records. Synthetic integration tests cover pause timing and API boundaries. A short owner recording validates this development path; recognition quality, hour-long operation, word-boundary stability, a persistent streaming runtime, packaging, and remote access remain qualification work. The cloud preview continues to use fictional data.
 
 Deliver one reliable vertical slice before extending the cloud interface or building every device client:
 

@@ -124,6 +124,13 @@ sealed class ChunkPump
 
 static class Archive
 {
+    public static bool IsRecording(Vault vault, string id)
+    {
+        string path = Path.Combine(vault.SessionPath(id), "capture.lock");
+        if (!File.Exists(path)) return false;
+        try { using var lease = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None); return false; }
+        catch (IOException) { return true; }
+    }
     public static SessionInfo ReadSession(Vault vault, string id) => vault.Read($"sessions/{id}/session.snm").Metadata.Deserialize<SessionInfo>(Vault.Json) ?? throw new InvalidDataException("Missing session.");
 
     public static Inspection Inspect(Vault vault, string id)

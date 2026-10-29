@@ -12,7 +12,7 @@ static class Diagnostics
     public static DiagnosticReport Analyze(Vault vault, string id)
     {
         var inspection = Archive.Inspect(vault, id);
-        if (inspection.State is "corrupt" or "recording") throw new InvalidDataException("Diagnosis requires an intact, stopped session.");
+        if (inspection.State == "corrupt") throw new InvalidDataException("Diagnosis requires intact committed audio.");
         var session = Archive.ReadSession(vault, id);
         string relative = $"sessions/{id}/";
         double Seconds(long qpc) => (qpc - session.StartQpc100ns) / 10_000_000.0;
@@ -60,6 +60,6 @@ static class Diagnostics
             results.Add(new(track.Id, chunks, frames, frames / (double)track.SampleRate, first, end,
                 20 * Math.Log10(Math.Max(peak, 1e-10)), 20 * Math.Log10(Math.Max(Math.Sqrt(squares / Math.Max(sampleCount, 1)), 1e-10)), nonFinite, issues.ToArray()));
         }
-        return new(id, inspection.State, wall, events, results.ToArray());
+        return new(id, inspection.State, wall > 0 ? wall : results.Max(track=>track.LastPacketSeconds), events, results.ToArray());
     }
 }

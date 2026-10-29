@@ -17,6 +17,8 @@ button, .button { transition: background-color .16s ease, color .16s ease, trans
 button:active, .button:active { transform: translateY(1px); }
 :focus-visible { outline: 3px solid var(--pine); outline-offset: 4px; }
 button:disabled { cursor: default; }
+button.button:disabled { background: var(--selected); color: var(--muted); }
+[hidden] { display: none !important; }
 img { display: block; max-width: 100%; }
 h1, h2, h3, p, blockquote { margin: 0; }
 h1, h2, h3 { text-wrap: balance; }
@@ -161,6 +163,8 @@ mark { color: var(--ink); background: var(--highlight); border-radius: 2px; }
 .local-player > p { grid-column: 1 / -1; }
 .recording-diagnostics { margin-top: 16px; }
 .local-model-note { margin: -8px 0 24px; }
+.local-live-progress { font-size: 14px; line-height: 1.6; margin: 16px 0; }
+#audio-window { grid-column: 1 / -1; }
 .seek-passage { border: 0; background: transparent; padding: 5px 0; align-self: start; min-height: 32px; text-decoration: underline; text-underline-offset: 4px; }
 .seek-passage:hover { color: var(--ink); }
 .workspace-footnote { color: var(--muted); font-size: 13px; margin-top: 24px; }
