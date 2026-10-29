@@ -25,6 +25,8 @@ npm run build
 
 Open http://localhost:8787. The development server uses the same Worker handler with a local static-assets adapter. Build creates `dist/` and an ignored `.deploy/bundle.json` containing asset hashes and the Worker module.
 
+Frontend work uses the project-local [Taste anti-slop skill](.agents/skills/design-taste-frontend/SKILL.md). Read [AGENTS.md](AGENTS.md) and the [frontend design brief](docs/FRONTEND_DESIGN.md) before changing the website or app screens. The brief records the installed source revision, license, offline constraints, and visual verification workflow.
+
 ## Deployment
 
 The production target is Cloudflare Workers with Static Assets. `src/deployment.json` defines the version settings; `src/worker.js` handles API routes, canonical redirects, and security headers. Deployment can use Cloudflare's [direct upload API](https://developers.cloudflare.com/workers/static-assets/direct-upload/): register the built manifest, upload requested asset buckets, then upload the Worker with the returned completion token and an `ASSETS` binding. Never commit upload tokens or deployment credentials.
