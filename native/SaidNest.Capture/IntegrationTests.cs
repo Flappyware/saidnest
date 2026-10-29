@@ -29,6 +29,7 @@ static class IntegrationTests
         await CheckLiveFailure(vault);
         await CheckQuality(vault,id);
         await RefinementQueueTests.Run(Path.GetFullPath(root));
+        await ReliabilityTests.Run(Path.GetFullPath(root));
 
         using var listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
         listener.Start(); int port = ((IPEndPoint)listener.LocalEndpoint).Port; listener.Stop();
@@ -46,6 +47,7 @@ static class IntegrationTests
             Check((await client.PostAsync($"/api/local/sessions/{id}/stop",null)).StatusCode == HttpStatusCode.Unauthorized,"recording controls reject missing token");
             Check((await client.GetAsync($"/api/local/sessions/{id}/evaluation")).StatusCode==HttpStatusCode.Unauthorized,"model hypotheses and references require authorization");
             Check((await client.GetAsync("/api/local/refinement-queue")).StatusCode==HttpStatusCode.Unauthorized,"queue metadata requires authorization");
+            Check((await client.GetAsync("/api/local/health")).StatusCode==HttpStatusCode.Unauthorized,"worker health requires authorization");
             Check((await client.PostAsync($"/api/local/sessions/{id}/queue-refinement",null)).StatusCode==HttpStatusCode.Unauthorized,"queue mutations require authorization");
             Check((await client.PutAsync($"/api/local/sessions/{id}/evaluation/unknown",new StringContent("{}",System.Text.Encoding.UTF8,"application/json"))).StatusCode==HttpStatusCode.Unauthorized,"reference writes reject missing token");
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", server.Token);
@@ -90,6 +92,13 @@ static class IntegrationTests
             using var foreignQueue=new HttpRequestMessage(HttpMethod.Post,$"/api/local/refinement-queue/{queueId}");foreignQueue.Headers.Add("Origin","https://example.invalid");foreignQueue.Content=new StringContent("{\"action\":\"resume\"}",System.Text.Encoding.UTF8,"application/json");
             Check((await client.SendAsync(foreignQueue)).StatusCode==HttpStatusCode.Forbidden,"cross-origin queue mutations are denied");
             Check((await client.PostAsync($"/api/local/sessions/{id}/queue-refinement",new StringContent("{\"model\":\"../unknown\"}",System.Text.Encoding.UTF8,"application/json"))).StatusCode==HttpStatusCode.UnprocessableEntity,"queue accepts provisioned profile names only");
+            string damagedId=Guid.NewGuid().ToString("N");
+            File.WriteAllBytes(Path.Combine(root,"refinement-queue",$"job-{damagedId}.snq"),[1,2,3]);
+            Check((await client.GetAsync("/api/local/sessions")).IsSuccessStatusCode && (await client.GetAsync($"/api/local/sessions/{id}")).IsSuccessStatusCode,"isolated queue damage does not block recording summaries");
+            var overview=await client.GetAsync("/api/local/refinement-queue");using var overviewJson=JsonDocument.Parse(await overview.Content.ReadAsStringAsync());
+            Check(overview.IsSuccessStatusCode && overviewJson.RootElement.GetProperty("issues").GetArrayLength()==1 && overviewJson.RootElement.GetProperty("jobs").GetArrayLength()==1,"queue API reports damaged records alongside healthy jobs");
+            var healthResponse=await client.GetAsync("/api/local/health");using var healthJson=JsonDocument.Parse(await healthResponse.Content.ReadAsStringAsync());
+            Check(healthResponse.IsSuccessStatusCode && healthResponse.Headers.CacheControl?.NoStore==true && !healthJson.RootElement.GetProperty("workerHealthy").GetBoolean() && healthJson.RootElement.GetProperty("queueIssues").GetArrayLength()==1,"HTTP success is distinct from healthy worker state");
         }
         finally { await server.App.StopAsync(); await server.App.DisposeAsync(); }
         await CheckServiceLifecycle(vault,queueProfile,port);

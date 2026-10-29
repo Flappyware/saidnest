@@ -6,6 +6,8 @@ namespace SaidNest.Capture;
 sealed record RefinementPolicy(bool Enabled=true,bool QueueNewRecordings=true,string Model="large-v3",int IdleSeconds=120,double MaxCpuBusyFraction=.25,bool RequireAcPower=true,double MaxGpuBusyFraction=.10,int MinGpuFreeMiB=6144,int MinRunningGpuFreeMiB=1024);
 sealed record RefinementJob(int Version,string Id,string SessionId,string Model,string State,string Notice,DateTimeOffset CreatedUtc,DateTimeOffset UpdatedUtc,string SourceManifestHash,string? ParentRevisionId,string RevisionId,EngineInstall Install,int CompletedWindows=0,double ProcessedSeconds=0,double TotalSeconds=0);
 sealed record RefinementWindow(string JobId,string SourceManifestHash,string ModelSha256,string Track,int Index,double Start,double Seconds,string AudioSha256,TrackTranscript Transcript);
+sealed record QueueIssue(string RecordKey,string? JobId,string Code,string Notice);
+sealed record QueueScan(RefinementJob[] Jobs,QueueIssue[] Issues);
 sealed class RefinementPreparation
 {
     public string? JobId;
@@ -32,8 +34,29 @@ static class RefinementQueue
         var deadline=DateTime.UtcNow.AddSeconds(5);
         while(true) { var gate=InferencePriority.TryAcquire(vault,"refinement-queue.lock"); if(gate!=null)return gate; if(DateTime.UtcNow>=deadline)throw new IOException("Queue is busy.");Thread.Sleep(10); }
     }
-    public static RefinementJob[] Jobs(Vault vault)=>Directory.Exists(Path.Combine(vault.Root,Folder))?Directory.GetFiles(Path.Combine(vault.Root,Folder),"job-*.snq").Select(path=>Read(vault,Path.GetFileNameWithoutExtension(path)[4..])).OrderBy(j=>j.CreatedUtc).ThenBy(j=>j.Id,StringComparer.Ordinal).ToArray():[];
-    public static RefinementJob Read(Vault vault,string id)=>vault.Read(JobPath(id)).Metadata.Deserialize<RefinementJob>(Vault.Json) ?? throw new InvalidDataException("Missing queue job.");
+    internal static bool RecordError(Exception ex)=>ex is IOException or InvalidDataException or CryptographicException or JsonException or ArgumentException or UnauthorizedAccessException or NotSupportedException;
+    public static QueueScan Scan(Vault vault)
+    {
+        var jobs=new List<RefinementJob>();var issues=new List<QueueIssue>();
+        try {
+            if(!Directory.Exists(Path.Combine(vault.Root,Folder)))return new([],[]);
+            foreach(string path in Directory.GetFiles(Path.Combine(vault.Root,Folder),"job-*.snq")) {
+                string name=Path.GetFileName(path),id=Path.GetFileNameWithoutExtension(path)[4..];
+                string key=Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(name)))[..12].ToLowerInvariant();
+                try {jobs.Add(Read(vault,id));}
+                catch(Exception ex)when(RecordError(ex)){issues.Add(new(key,Guid.TryParseExact(id,"N",out _)?id:null,"unreadable-record","A queue record could not be verified. It is retained in place and excluded from processing; healthy records remain available."));}
+            }
+        }catch(Exception ex)when(RecordError(ex)){issues.Add(new("queue-directory",null,"queue-unavailable","Queue records could not be listed. Recording data is retained; check local storage access."));}
+        return new(jobs.OrderBy(j=>j.CreatedUtc).ThenBy(j=>j.Id,StringComparer.Ordinal).ToArray(),issues.ToArray());
+    }
+    public static RefinementJob[] Jobs(Vault vault)=>Scan(vault).Jobs;
+    public static RefinementJob Read(Vault vault,string id)
+    {
+        var job=vault.Read(JobPath(id)).Metadata.Deserialize<RefinementJob>(Vault.Json) ?? throw new InvalidDataException("Missing queue job.");
+        if(job.Version!=1 || job.Id!=id || !Guid.TryParseExact(job.SessionId,"N",out _) || !Guid.TryParseExact(job.RevisionId,"N",out _) || (job.ParentRevisionId!=null && !Guid.TryParseExact(job.ParentRevisionId,"N",out _)) || !ModelProfiles.Names.Contains(job.Model,StringComparer.Ordinal) || job.State is not ("queued" or "deferred" or "running" or "paused" or "failed" or "completed" or "cancelled") || string.IsNullOrEmpty(job.SourceManifestHash) || job.Install==null || string.IsNullOrWhiteSpace(job.Install.Executable) || string.IsNullOrWhiteSpace(job.Install.Model) || string.IsNullOrWhiteSpace(job.Install.ModelSha256) || job.CompletedWindows<0 || !double.IsFinite(job.ProcessedSeconds) || !double.IsFinite(job.TotalSeconds) || job.ProcessedSeconds<0 || job.TotalSeconds<0 || job.CreatedUtc==default || job.UpdatedUtc==default)throw new InvalidDataException("Invalid queue record metadata.");
+        return job;
+    }
+    static RefinementJob? TryRead(Vault vault,string id){try{return Read(vault,id);}catch(Exception ex)when(RecordError(ex)){return null;}}
     static void Save(Vault vault,RefinementJob job)=>vault.Replace(JobPath(job.Id),job);
     public static object Summary(RefinementJob job)=>new {job.Id,job.SessionId,job.Model,job.State,job.Notice,job.CreatedUtc,job.UpdatedUtc,job.CompletedWindows,job.ProcessedSeconds,job.TotalSeconds,job.RevisionId};
     public static RefinementJob Enqueue(Vault vault,string sessionId,string defaultInstall,string model)
@@ -78,21 +101,23 @@ static class RefinementQueue
         if(window.JobId!=job.Id || window.Track!=track || window.Index!=index || window.SourceManifestHash!=job.SourceManifestHash || window.ModelSha256!=job.Install.ModelSha256)throw new InvalidDataException("Checkpoint provenance mismatch.");
         return window;
     }
-    static void Status(Vault vault,RefinementJob job,string state,string notice,int windows,double processed,double total)
+    static bool Status(Vault vault,RefinementJob job,string state,string notice,int windows,double processed,double total)
     {
-        using var gate=Lock(vault);var current=Read(vault,job.Id);
-        if(current.State is "paused" or "cancelled")return;
+        using var gate=Lock(vault);var current=TryRead(vault,job.Id);
+        if(current==null || current.State is "paused" or "cancelled")return false;
         job=current with {State=state,Notice=notice,UpdatedUtc=DateTimeOffset.UtcNow,CompletedWindows=windows,ProcessedSeconds=processed,TotalSeconds=total};Save(vault,job);
         vault.Replace($"sessions/{job.SessionId}/refinement.snj",new RefinementStatus(state,job.Model,processed,total,DateTimeOffset.UtcNow,notice));
+        return true;
     }
-    public static async Task<bool> Step(Vault vault,Func<IdleSample> environment,CancellationToken token=default,Func<RenderedAudio,string,CancellationToken,Task<TrackTranscript>>? testDecoder=null,RefinementPreparation? preparation=null)
+    public static async Task<bool> Step(Vault vault,Func<IdleSample> environment,CancellationToken token=default,Func<RenderedAudio,string,CancellationToken,Task<TrackTranscript>>? testDecoder=null,RefinementPreparation? preparation=null,QueueWorkerReporter? health=null)
     {
         using var worker=InferencePriority.TryAcquire(vault,"refinement-worker.lock");if(worker==null)return false;
-        var job=Jobs(vault).FirstOrDefault(j=>j.State is "queued" or "deferred" or "running");if(job==null)return false;
+        var scan=Scan(vault);health?.QueueState(scan);
+        var job=scan.Jobs.FirstOrDefault(j=>j.State is "queued" or "deferred" or "running");if(job==null){health?.Activity("idle","No queued work is ready.");return false;}
         var reason=Blocked(vault,Policy(vault),environment());
-        if(reason!=null) { if(job.State!="deferred" || job.Notice!=reason)Status(vault,job,"deferred",reason,job.CompletedWindows,job.ProcessedSeconds,job.TotalSeconds);return false; }
+        if(reason!=null) {health?.Activity("waiting",reason); if(job.State!="deferred" || job.Notice!=reason)Status(vault,job,"deferred",reason,job.CompletedWindows,job.ProcessedSeconds,job.TotalSeconds);return false; }
         using var inference=InferencePriority.TryAcquire(vault);
-        if(inference==null){Status(vault,job,"deferred","Waiting for another local model job.",job.CompletedWindows,job.ProcessedSeconds,job.TotalSeconds);return false;}
+        if(inference==null){health?.Activity("waiting","Waiting for another local model job.");Status(vault,job,"deferred","Waiting for another local model job.",job.CompletedWindows,job.ProcessedSeconds,job.TotalSeconds);return false;}
         using var windowCancellation=CancellationTokenSource.CreateLinkedTokenSource(token);
         using var monitorStop=new CancellationTokenSource();
         string? yieldReason=null;
@@ -106,7 +131,8 @@ static class RefinementQueue
             catch { yieldReason="Resource status could not be read; refinement is deferred.";windowCancellation.Cancel(); }
         });
         try {
-            Status(vault,job,"running","Preparing the next resumable local refinement window.",job.CompletedWindows,job.ProcessedSeconds,job.TotalSeconds);
+            if(!Status(vault,job,"running","Preparing the next resumable local refinement window.",job.CompletedWindows,job.ProcessedSeconds,job.TotalSeconds))return false;
+            health?.Activity("running","Processing an encrypted refinement window.",job.Id);
             // Verify once per uninterrupted idle stint. Render still authenticates each used chunk.
             preparation??=new();
             if(vault.Read($"sessions/{job.SessionId}/final.snm").Hash!=job.SourceManifestHash)throw new InvalidDataException("Source changed after enqueue.");
@@ -146,6 +172,7 @@ static class RefinementQueue
                     }
                 }finally {CryptographicOperations.ZeroMemory(audio.Wav);}
                 Status(vault,job,"queued","Window saved encrypted; remaining work will run when idle.",completed+1,processed+work.Seconds,total);
+                health?.Progress();
                 return true;
             }
             windowCancellation.Token.ThrowIfCancellationRequested();
@@ -162,12 +189,25 @@ static class RefinementQueue
                 Save(vault,job with {State="completed",Notice="Refinement saved as a new encrypted version. Earlier versions are retained.",UpdatedUtc=DateTimeOffset.UtcNow,CompletedWindows=completed,ProcessedSeconds=total,TotalSeconds=total});
                 vault.Replace($"sessions/{job.SessionId}/refinement.snj",new RefinementStatus("complete",job.Model,total,total,DateTimeOffset.UtcNow,"Queued refinement saved. Earlier versions are retained."));
             }
+            health?.Progress();
             return true;
         }catch(OperationCanceledException)when(windowCancellation.IsCancellationRequested) {
-            Status(vault,job,"deferred",yieldReason ?? "Worker stopped; saved windows will resume next time.",Read(vault,job.Id).CompletedWindows,Read(vault,job.Id).ProcessedSeconds,Read(vault,job.Id).TotalSeconds);return false;
+            var saved=TryRead(vault,job.Id);
+            if(saved==null){IsolatedStatus(vault,job);health?.Activity("waiting","A damaged in-progress queue record was isolated.");return false;}
+            health?.Activity("waiting",yieldReason ?? "Worker is stopping; saved work is retained.");
+            Status(vault,job,"deferred",yieldReason ?? "Worker stopped; saved windows will resume next time.",saved.CompletedWindows,saved.ProcessedSeconds,saved.TotalSeconds);return false;
         }catch(Exception ex)when(ex is IOException or InvalidDataException or CryptographicException or JsonException or InvalidOperationException or ArgumentException) {
-            Status(vault,job,"failed","Refinement could not finish. Original audio, live text, and saved windows are retained; check the model/source before resuming.",Read(vault,job.Id).CompletedWindows,Read(vault,job.Id).ProcessedSeconds,Read(vault,job.Id).TotalSeconds);return false;
+            var saved=TryRead(vault,job.Id);
+            if(saved==null){IsolatedStatus(vault,job);health?.Activity("waiting","A damaged in-progress queue record was isolated.");return false;}
+            health?.JobFailure();
+            Status(vault,job,"failed","Refinement could not finish. Original audio, live text, and saved windows are retained; check the model/source before resuming.",saved.CompletedWindows,saved.ProcessedSeconds,saved.TotalSeconds);return false;
         }finally {monitorStop.Cancel();await monitor;}
+    }
+    static void IsolatedStatus(Vault vault,RefinementJob trustedJob)
+    {
+        // Called only while this step still owns inference. Preserve the damaged job bytes;
+        // update its separate derived display state so it cannot appear to run forever.
+        vault.Replace($"sessions/{trustedJob.SessionId}/refinement.snj",new RefinementStatus("isolated",trustedJob.Model,trustedJob.ProcessedSeconds,trustedJob.TotalSeconds,DateTimeOffset.UtcNow,"The queue record became unreadable and was isolated. Earlier text and audio are retained."));
     }
     static async Task<EngineInstall> LoadJob(RefinementJob job,CancellationToken token)
     {
@@ -176,8 +216,16 @@ static class RefinementQueue
         await using var model=File.OpenRead(install.Model);
         if(!string.Equals(Convert.ToHexString(await SHA256.HashDataAsync(model,token)),install.ModelSha256,StringComparison.OrdinalIgnoreCase))throw new CryptographicException("Queued model checksum mismatch.");return install;
     }
-    public static async Task Run(Vault vault,CancellationToken token)
+    public static async Task Run(Vault vault,CancellationToken token,Func<CancellationToken,Task<bool>>? testCycle=null)
     {
+        FileStream? acquiredHost=null;
+        while(acquiredHost==null && !token.IsCancellationRequested) {
+            acquiredHost=InferencePriority.TryAcquire(vault,"refinement-host.lock");
+            if(acquiredHost==null){try{await Task.Delay(2000,token);}catch(OperationCanceledException)when(token.IsCancellationRequested){return;}}
+        }
+        if(acquiredHost==null)return;
+        using var host=acquiredHost;
+        await using var health=new QueueWorkerReporter(vault);
         using var environment=new IdleEnvironment();
         IdleSample Resources() {
             var sample=environment.Read(includeGpu:false);var policy=Policy(vault);
@@ -187,9 +235,9 @@ static class RefinementQueue
         }
         var preparation=new RefinementPreparation();
         while(!token.IsCancellationRequested) {
-            try {bool advanced=await Step(vault,Resources,token,preparation:preparation);if(!advanced)preparation.Clear();await Task.Delay(advanced?100:2000,token);}
+            try {bool advanced=testCycle==null?await Step(vault,Resources,token,preparation:preparation,health:health):await testCycle(token);health.CycleFinished();if(!advanced)preparation.Clear();await Task.Delay(advanced?100:2000,token);}
             catch(OperationCanceledException)when(token.IsCancellationRequested) {break;}
-            catch(Exception ex)when(ex is IOException or InvalidDataException or CryptographicException or JsonException) { await Task.Delay(2000); }
+            catch(Exception ex)when(ex is not OutOfMemoryException and not AccessViolationException){preparation.Clear();health.Fault();try{await Task.Delay(5000,token);}catch(OperationCanceledException)when(token.IsCancellationRequested){break;}}
         }
     }
 }

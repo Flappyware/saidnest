@@ -54,4 +54,6 @@ GPU signals use driver-installed [NVIDIA NVML](https://docs.nvidia.com/deploy/nv
 
 ## Verification
 
+The [reliability pass](RELIABILITY.md) adds isolated corrupt-record reporting, worker health, and decoder crash containment. Queue responses include safe `issues`; the local timeline keeps health separate from the transcript editor. Use `worker-health` for heartbeat, last successful progress and error codes. A healthy web listener alone does not prove that its worker is healthy.
+
 Generated-audio integration tests exercise active-input/CPU/battery/unknown-status deferral, GPU load/VRAM admission, cancellation for new outside GPU load or critical VRAM pressure, self-utilization exclusion, legacy policy migration, returning input, new capture/live preemption with preserved frames, stale-running recovery from encrypted checkpoints, pause/resume/cancel, singleton execution, idempotent enqueue/completion, failure isolation, version selection, and queue API authorization/cross-origin denial. `queue-cuda-smoke --gpu-check` exercises real provisioned large-v3 inference with actual GPU guards on generated tone/silence and controlled non-GPU eligibility inputs. It is not a recognition-quality or real-idle benchmark.

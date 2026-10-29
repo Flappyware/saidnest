@@ -33,6 +33,27 @@ document.querySelector('.filter-label .sr-only').textContent = 'Filter source co
 filter.innerHTML = '<option value="all">All recordings</option><option value="duplex">Microphone + output</option><option value="mic">Microphone only</option><option value="output">Output only</option>';
 const archiveNotice=fixture ? 'Synthetic integration fixture. No private recording is shown.' : 'Your archive on this computer. Local English transcription uses an experimental model; check important passages against the audio.';
 notice.textContent=archiveNotice;
+const workerStatus=document.createElement('p');workerStatus.className='preview-notice worker-health';workerStatus.id='worker-health';workerStatus.setAttribute('role','status');workerStatus.hidden=true;notice.after(workerStatus);
+let workerTimer;
+async function refreshWorkerHealth(){
+  if(!token)return;
+  const controller=new AbortController(),deadline=setTimeout(()=>controller.abort(),10000);
+  try {
+    if(document.hidden)return;
+    const data=await (await api('/api/local/health',{signal:controller.signal})).json();
+    if(!data.worker){workerStatus.hidden=true;return;}
+    const worker=data.worker,isolated=data.queueIssues?.length||0,failed=data.failedJobs||0;
+    let text=worker.state==='disabled'?worker.notice:worker.state==='healthy'?`Refinement: ${worker.worker?.activity||'ready'}. ${worker.notice}`:`Refinement needs attention. ${worker.notice}`;
+    if(worker.state==='degraded' && (isolated||failed))text='Refinement needs attention.';
+    if(isolated)text+=` ${isolated} damaged queue record${isolated===1?' is':'s are'} isolated; other recordings remain available.`;
+    if(failed)text+=` ${failed} refinement job${failed===1?' needs':'s need'} review.`;
+    if(worker.worker?.lastProgressUtc)text+=` Last completed work: ${new Date(worker.worker.lastProgressUtc).toLocaleString()}.`;
+    if(workerStatus.textContent!==text)workerStatus.textContent=text;
+    workerStatus.hidden=false;workerStatus.dataset.state=isolated||failed?'degraded':worker.state;workerStatus.dataset.checkedAt=new Date().toISOString();
+  }catch {workerStatus.hidden=false;workerStatus.dataset.state='unavailable';workerStatus.textContent='Worker status is unavailable. Reopen local SaidNest if the service has restarted.';}
+  finally {clearTimeout(deadline);workerTimer=setTimeout(refreshWorkerHealth,5000);}
+}
+window.addEventListener('pagehide',()=>clearTimeout(workerTimer));
 
 let token;
 try {
@@ -205,3 +226,4 @@ async function start(silent=false) {
   finally { refreshing=false; }
 }
 start();
+refreshWorkerHealth();

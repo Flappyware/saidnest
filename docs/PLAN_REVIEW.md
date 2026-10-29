@@ -1,6 +1,6 @@
 # SaidNest Project Plan Review
 
-Reviewed October 28, 2026. The architecture direction remains local-first recording and an owner-controlled repository, with optional managed connectivity and compute. The main delivery risk is treating the deployed interface as progress on capture, storage, identity, or inference before those components have executable evidence.
+Reviewed October 29, 2026. The architecture direction remains local-first recording and an owner-controlled repository, with optional managed connectivity and compute. The main delivery risk is treating the deployed interface as progress on capture, storage, identity, or inference before those components have executable evidence.
 
 ## Current evidence
 
@@ -10,7 +10,7 @@ These observations support the foundation preview and early Windows development 
 
 ## Gaps and plan changes
 
-The following planning changes are recorded. Their associated implementation and validation remain open.
+The following planning changes are recorded. Prototype implementation evidence and remaining release qualification are distinct; none of these rows alone establishes local-alpha readiness.
 
 | Gap | Consequence | Added requirement and gate |
 | --- | --- | --- |
@@ -26,6 +26,14 @@ The following planning changes are recorded. Their associated implementation and
 | G10 Capture experience | Wrong sources or permission loss can create silent or unintended recordings | Require explicit recording, source meters, indicators, accessible controls, and visible interruption states |
 | G11 Release readiness | Web-only CI cannot verify native recording, migrations, or updates | Expand platform/protocol checks and add staging, rollback, security review, support, and incident ownership |
 | G12 Documentation consistency | Outdated provisional decisions can contradict the release | Record MIT application licensing, manual deployment, one canonical private plan, and synchronized public summaries |
+| G13 Queue record isolation | One damaged job can block healthy work and recording-list responses | Implemented per-record verification and issue reporting; retain damaged bytes in place, keep healthy jobs/catalog usable, and test mixed valid/corrupt records |
+| G14 Worker health | A running service can conceal a failed or stalled worker | Implemented encrypted heartbeat/progress/fault reporting, safe retry backoff and local UI/CLI/API status; independent supervisor recovery remains open |
+| G15 Decoder crash containment | Killing the parent alone can leave decoder work running | Implemented a Windows child-lifetime boundary; test parent-only crashes for child/grandchild and real CUDA decoder; driver hangs and atomic spawn/assignment remain outside the evidence |
+| G16 Backlog and resource lifecycle | Strict idle rules can starve jobs, while raw audio/checkpoints fill storage | Still open: queue age/limits, scheduling controls, RAM/disk admission, retention/compression and safe cleanup; measure end-to-end completion during normal computer use |
+| G17 Corrected transcript provenance | Accuracy references can be mistaken for corrected saved history | Still open: durable owner-corrected transcript revisions, edit preservation across refinement and indexed retrieval; checked references currently score candidates only |
+| G18 Daily-use qualification | Synthetic checks do not establish an hour-long meeting or cross-machine recovery | Still open: headphone meeting through genuine idle refinement, representative checked corpus, real sign-in, clean-machine restore and remaining hardware fleet |
+
+The [reliability pass](RELIABILITY.md) records the implementation and evidence boundaries for G13–G15. Corruption isolation of other derived archive metadata remains open.
 
 ## Decisions to make before implementation
 

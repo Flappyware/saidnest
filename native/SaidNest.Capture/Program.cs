@@ -17,6 +17,8 @@ static class Program
             if (command == "devices") { Console.WriteLine(JsonSerializer.Serialize(Recorder.Devices(), Vault.Json)); return 0; }
             if (command == "output-activity") { Console.WriteLine(JsonSerializer.Serialize(await Recorder.OutputActivity(), Vault.Json)); return 0; }
             if (command == "integration-test") { await IntegrationTests.Run(Option("--out") ?? ".saidnest/integration-tests"); return 0; }
+            if(command.StartsWith("decoder-crash-",StringComparison.Ordinal)){return await DecoderCrashTests.Command(command,Option("--out") ?? ".saidnest/decoder-crash-tests",Option("--install"));}
+            if(command=="worker-health"){using var vault=Vault.Open(root);Console.WriteLine(JsonSerializer.Serialize(QueueWorkerHealth.Read(vault),Vault.Json));return 0;}
             if(command=="queue-cuda-smoke") {await RefinementQueueTests.CudaSmoke(Path.GetFullPath(Option("--out") ?? ".saidnest/queue-cuda-tests"),Path.GetFullPath(Option("--install") ?? ".saidnest/inference/install.json"),args.Contains("--gpu-check"));return 0;}
             if(command=="idle-status") {using var environment=new IdleEnvironment();environment.Read();await Task.Delay(1100);Console.WriteLine(JsonSerializer.Serialize(environment.Read(),Vault.Json));return 0;}
             if(command is "queue-refinement" or "refinement-queue" or "refinement-policy" or "refinement-worker") {
@@ -38,7 +40,7 @@ static class Program
                     using var stop=new CancellationTokenSource();ConsoleCancelEventHandler handler=(_,e)=>{e.Cancel=true;stop.Cancel();};Console.CancelKeyPress+=handler;
                     try {Console.WriteLine("Idle refinement worker running locally. Ctrl+C checkpoints and stops it.");await RefinementQueue.Run(vault,stop.Token);}finally{Console.CancelKeyPress-=handler;}
                 } else if(Option("--job") is {} job)Console.WriteLine(JsonSerializer.Serialize(RefinementQueue.Summary(RefinementQueue.Control(vault,job,Option("--action") ?? throw new ArgumentException("Select --action pause, resume, or cancel."))),Vault.Json));
-                else Console.WriteLine(JsonSerializer.Serialize(new {policy=RefinementQueue.Policy(vault),jobs=RefinementQueue.Jobs(vault).Select(RefinementQueue.Summary)},Vault.Json));
+                else {var scan=RefinementQueue.Scan(vault);Console.WriteLine(JsonSerializer.Serialize(new {policy=RefinementQueue.Policy(vault),jobs=scan.Jobs.Select(RefinementQueue.Summary),issues=scan.Issues,worker=QueueWorkerHealth.Read(vault)},Vault.Json));}
                 return 0;
             }
             if (command == "serve-fixture")
@@ -54,6 +56,12 @@ static class Program
                     File.WriteAllText(Path.Combine(fixtureRoot,"install-large-v3.json"),JsonSerializer.Serialize(new EngineInstall("fixture","fixture","fixture","fixture","fixture","large-v3"),Vault.Json));
                     var job=RefinementQueue.Enqueue(fixtureVault,fixtureId,profile,"large-v3");
                     fixtureVault.Replace($"refinement-queue/job-{job.Id}.snq",job with {State="deferred",Notice="Synthetic queue fixture. Waiting for idle time; no background inference runs in this preview."});
+                }
+                await using var fixtureHealth=args.Contains("--reliability")?new QueueWorkerReporter(fixtureVault):null;
+                if(fixtureHealth!=null) {
+                    Directory.CreateDirectory(Path.Combine(fixtureRoot,"refinement-queue"));
+                    File.WriteAllBytes(Path.Combine(fixtureRoot,"refinement-queue",$"job-{Guid.NewGuid():N}.snq"),[1,2,3]);
+                    fixtureHealth.QueueState(RefinementQueue.Scan(fixtureVault));fixtureHealth.Activity("waiting","Synthetic health demonstration; background inference is disabled in this fixture.");
                 }
                 using var fixtureLease = args.Contains("--live") ? new FileStream(Path.Combine(fixtureVault.SessionPath(fixtureId),"capture.lock"),FileMode.Open,FileAccess.ReadWrite,FileShare.None) : null;
                 if (fixtureLease!=null)
@@ -264,6 +272,8 @@ static class Program
                   refinement-queue [--job ID --action pause|resume|cancel]  Show/control local queue
                   refinement-policy [--idle-seconds 120] [--max-cpu 0.25] [--allow-battery]
                   refinement-worker                Run the idle worker without opening the timeline
+                  worker-health                    Show heartbeat, progress and safe fault codes
+                  decoder-crash-test [--install PROFILE.json]  Parent-only crash cleanup test; generated audio only
                   serve [--port 8788]               Open the authenticated loopback-only timeline
                   open                             Reopen the running private timeline without printing its key
                   live-status --session ID          Show counts and timing only; no transcript text

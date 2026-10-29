@@ -1,6 +1,6 @@
 # SaidNest Roadmap
 
-Reviewed October 28, 2026. The public preview is deployed; a separate Windows recording and local timeline prototype is implemented. The [architecture](ARCHITECTURE.md) and [plan review](PLAN_REVIEW.md) describe the boundaries and gaps behind these milestones.
+Reviewed October 29, 2026. The public preview is deployed; a separate Windows recording and local timeline prototype is implemented. The [architecture](ARCHITECTURE.md) and [plan review](PLAN_REVIEW.md) describe the boundaries and gaps behind these milestones.
 
 ## Foundation preview
 
@@ -31,6 +31,8 @@ Gate: recording and saved audio survive an application/repository restart, infer
 The development slice now supports selected live and refinement models, immutable transcript versions, frozen multi-model comparisons, and encrypted owner-checked references for WER. Live transcription should use the lightest useful model; `tiny.en` remains the default. High-quality refinement runs separately when convenient. Timings, model disagreement, synthetic smoke accuracy, and checked meeting accuracy are separate evidence. See [model evaluation](MODEL_EVALUATION.md). A persistent worker, representative references, a clean lightweight live baseline, and sustained opportunistic refinement qualification remain open; [WhisperX alignment/diarization](SPEAKR_REVIEW.md) is a later optional pass.
 
 The [refinement queue](REFINEMENT_QUEUE.md) now supports encrypted jobs/window checkpoints, idle/CPU/AC/GPU admission, cancellation and lock release for recording/live text, returning input, other GPU activity or critical VRAM pressure, restart resume, and pause/resume/cancel controls. [Current-user Windows auto-start](WINDOWS_AUTOSTART.md) runs the local service quietly with singleton supervision and restart backoff. System RAM admission, multiple-NVIDIA-device mapping, optional time schedules, a real sign-in check, and sustained concurrent-app/meeting qualification remain open.
+
+The [reliability pass](RELIABILITY.md) adds per-record queue corruption isolation, encrypted worker heartbeat/progress/fault reporting in the local UI/CLI/API, and active-decoder cleanup after parent-only crashes. The next acceptance run is a sixty-minute headphone meeting followed by genuine idle refinement; backlog/storage lifecycle, durable transcript corrections, broader metadata isolation, restore and other-machine qualification remain open.
 
 Status: Planned; builds on the first Windows slice.
 

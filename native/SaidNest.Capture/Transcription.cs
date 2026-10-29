@@ -122,7 +122,7 @@ static partial class Transcription
         return install;
     }
 
-    public static async Task<TrackTranscript> Decode(EngineInstall install, RenderedAudio audio, string trackId, CancellationToken cancellationToken = default, bool bypassQuietGuard=false,bool background=false)
+    public static async Task<TrackTranscript> Decode(EngineInstall install, RenderedAudio audio, string trackId, CancellationToken cancellationToken = default, bool bypassQuietGuard=false,bool background=false,Action<int>? testGpuReady=null)
     {
         try
         {
@@ -144,13 +144,18 @@ static partial class Transcription
             foreach (string argument in new[] { "--model", install.Model, "--file", "-", "--output-file", "saidnest-memory-only", "--language", "en", "--threads", "8", "--best-of", install.BestOf.ToString(), "--beam-size", install.BeamSize.ToString(), "--temperature", "0", "--temperature-inc", "0", "--suppress-nst" }) settings.ArgumentList.Add(argument);
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(TimeSpan.FromMinutes(2));
+            using var lifetime=new DecoderLifetime();
             using var process = Process.Start(settings) ?? throw new IOException("Local inference process did not start.");
+            lifetime.Attach(process);
             using var ownership=background?GpuOwnership.Register(process.Id):null;
             if(background) {try {process.PriorityClass=ProcessPriorityClass.BelowNormal;}catch(System.ComponentModel.Win32Exception) { }}
             try
             {
                 var stdout = ReadLimited(process.StandardOutput, 2 * 1024 * 1024, timeout.Token);
-                var stderr = ReadLimited(process.StandardError, 1024 * 1024, timeout.Token);
+                int signalled=0;
+                var stderr = ReadLimited(process.StandardError, 1024 * 1024, timeout.Token,testGpuReady==null?null:text=> {
+                    if(Regex.IsMatch(text,@"whisper_backend_init_gpu: using CUDA\d+ backend") && Regex.IsMatch(text,@"CUDA\d+ total size") && Interlocked.Exchange(ref signalled,1)==0)testGpuReady(process.Id);
+                });
                 await process.StandardInput.BaseStream.WriteAsync(audio.Wav, timeout.Token);
                 process.StandardInput.Close();
                 await process.WaitForExitAsync(timeout.Token);
@@ -172,7 +177,7 @@ static partial class Transcription
         finally { CryptographicOperations.ZeroMemory(audio.Wav); }
     }
 
-    static async Task<string> ReadLimited(StreamReader reader, int limit, CancellationToken token)
+    static async Task<string> ReadLimited(StreamReader reader, int limit, CancellationToken token,Action<string>? inspect=null)
     {
         var result = new StringBuilder();
         char[] buffer = new char[4096];
@@ -181,6 +186,7 @@ static partial class Transcription
         {
             if (result.Length + count > limit) throw new InvalidDataException("Inference output exceeded the local worker limit.");
             result.Append(buffer, 0, count);
+            inspect?.Invoke(result.ToString());
         }
         return result.ToString();
     }

@@ -74,9 +74,10 @@ static class LocalServer
                 diagnosticFlags = diagnostic?.Tracks.SelectMany(track => track.Issues).ToArray() ?? [],
                 live = LiveTranscription.ReadStatus(vault, id), refinement=Transcription.ReadRefinement(vault,id), queueJob=RefinementQueue.Jobs(vault).Where(j=>j.SessionId==id).LastOrDefault() is {} queueJob?RefinementQueue.Summary(queueJob):null, captureConditions=CaptureConditions.Read(vault,id), transcript = Transcription.Latest(vault, id) };
         }
-        app.MapGet("/api/local/health", () => Results.Json(new { local = true, fixture, model = "Local CUDA profiles, selected per job (experimental)", language = "en" }));
+        WorkerHealthView Health()=>fixture && !File.Exists(Path.Combine(vault.Root,QueueWorkerHealth.Path))?new("disabled","Synthetic fixture; no background inference runs here.",null):QueueWorkerHealth.Read(vault);
+        app.MapGet("/api/local/health", () => {var scan=RefinementQueue.Scan(vault);var worker=Health();return Results.Json(new { local = true, fixture, model = "Local CUDA profiles, selected per job (experimental)", language = "en",service="ready",worker,queueIssues=scan.Issues,failedJobs=scan.Jobs.Count(j=>j.State=="failed"),workerHealthy=worker.State=="healthy" && scan.Issues.Length==0 && !scan.Jobs.Any(j=>j.State=="failed") });});
         app.MapGet("/api/local/models",()=>Results.Json(ModelProfiles.Available(installFile)));
-        app.MapGet("/api/local/refinement-queue",()=>Results.Json(new {policy=RefinementQueue.Policy(vault),jobs=RefinementQueue.Jobs(vault).Select(RefinementQueue.Summary)}));
+        app.MapGet("/api/local/refinement-queue",()=>{var scan=RefinementQueue.Scan(vault);return Results.Json(new {policy=RefinementQueue.Policy(vault),jobs=scan.Jobs.Select(RefinementQueue.Summary),issues=scan.Issues,worker=Health()});});
         app.MapPut("/api/local/refinement-queue/policy",async(HttpRequest request)=> {
             var policy=await request.ReadFromJsonAsync<RefinementPolicy>() ?? throw new ArgumentException("Select queue preferences.");
             RefinementQueue.SetPolicy(vault,policy);return Results.Json(policy);
