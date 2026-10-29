@@ -6,7 +6,7 @@ Implemented October 28, 2026 in the Windows prototype. Live recognition stays on
 
 New successful recordings are automatically queued with the policy's high-quality model (`large-v3` by default), provided that profile has been provisioned. Missing model settings leave the recording saved and report that it was not queued. The recorder does not wait for refinement. Existing recordings are not automatically backfilled; choose **Queue refinement** in the local timeline for one you want processed.
 
-Keep the local timeline service running, or run `refinement-worker` without the browser. Closing a browser tab does not stop the service. Stopping the service or restarting Windows leaves the queue and completed windows on disk; reopen the service/worker to resume. This is not a Windows startup service yet.
+Keep the local timeline service running, or run `refinement-worker` without the browser. Closing a browser tab does not stop the service. Stopping the service or restarting Windows leaves the queue and completed windows on disk. [Windows auto-start](WINDOWS_AUTOSTART.md) can launch the service quietly at sign-in and restart it after an unexpected exit; it never starts recording.
 
 The initial policy requires:
 
@@ -14,10 +14,11 @@ The initial policy requires:
 - CPU utilization at or below 25% before starting a window.
 - AC power, unless battery work is explicitly allowed.
 - No active recording or foreground transcription request, and an available inference lock.
+- Outside GPU activity at or below 10%, and at least 6144 MiB (6 GiB) of free NVIDIA VRAM before starting a window.
 
-Unknown input/power/CPU readings defer work. CPU headroom is an admission check; the worker does not cancel itself because its own decode raises CPU use. It checks input, power, policy, pause/cancel requests, and foreground activity approximately every 200ms during a window. A new input or foreground request cancels the current child decoder, releases the model lock after cancellation/child exit, and leaves that unfinished window for later. Detection interval is not a guaranteed release latency. Archive preparation also checks cancellation between chunks. Completed windows remain encrypted.
+Unknown input/power/CPU/GPU readings defer work. CPU headroom is an admission check; the worker does not cancel itself because its own decode raises CPU use. It checks input, power, policy, pause/cancel requests, and foreground activity approximately every 200ms during a window. GPU telemetry is cached for one second and rate counters need warm-up samples. Outside GPU activity over the threshold, or free VRAM below 1024 MiB during a window, also cancels unfinished work. The lower running VRAM threshold lets the model consume its admitted reservation while retaining an emergency margin. A new input or foreground request cancels the current child decoder, releases the model lock after cancellation/child exit, and leaves that unfinished window for later. Detection/sample intervals are not guaranteed release latency or a guarantee of zero contention. Archive preparation also checks cancellation between chunks. Completed windows remain encrypted.
 
-Input idle time is session-specific, not a measure of attention or activity in every Windows login. GPU load from unrelated applications, memory pressure, scheduled time windows, and a resident model worker are not yet admission signals. The current CLI decoder exits after each window, releasing its GPU allocation. Qualify busy-GPU behavior and longer workloads before claiming general resource isolation.
+Input idle time is session-specific, not a measure of attention or activity in every Windows login. GPU monitoring currently requires exactly one NVIDIA device plus working Windows GPU Engine counters; unavailable or ambiguous telemetry defers refinement. Per-process engine rates exclude only decoder PIDs started by this worker, with a two-second tail for counter sampling. Other processes sharing an engine are summed, then the busiest engine is used; engines on other Windows adapters conservatively count too. NVIDIA device-wide utilization is an extra admission check when no owned decoder is active/recent. The current CLI decoder runs at BelowNormal CPU priority and exits after each window, releasing its GPU allocation. GPU monitoring is released while basic idle/power conditions fail, avoiding continuous discrete-GPU probing during active or battery use. System RAM pressure, multiple-NVIDIA-device mapping, optional time schedules, and a resident model worker remain future work. Longer concurrent-app workloads still need qualification.
 
 ## Controls and preferences
 
@@ -31,6 +32,7 @@ queue-refinement --session SESSION_ID --model large-v3
 refinement-queue --job JOB_ID --action pause
 refinement-queue --job JOB_ID --action resume
 refinement-policy --idle-seconds 120 --max-cpu 0.25 --require-ac
+refinement-policy --max-gpu 0.10 --gpu-free-mib 6144 --gpu-running-free-mib 1024
 refinement-policy --disable
 refinement-policy --enable --auto-queue
 refinement-worker
@@ -48,6 +50,8 @@ Queue metadata and controls use the same loopback bearer authorization, Host/Ori
 
 Windows signal references: [GetLastInputInfo](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getlastinputinfo), [GetSystemTimes](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getsystemtimes), and [GetSystemPowerStatus](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-getsystempowerstatus).
 
+GPU signals use driver-installed [NVIDIA NVML](https://docs.nvidia.com/deploy/nvml-api/latest/api/group__nvmlDeviceQueries.html) and Windows [PDH counter arrays](https://learn.microsoft.com/en-us/windows/win32/api/pdh/nf-pdh-pdhgetformattedcounterarrayw). No monitoring agent or new model is downloaded. `idle-status` prints aggregate readings only; it does not list applications, process arguments, or transcript words.
+
 ## Verification
 
-Generated-audio integration tests exercise active-input/CPU/battery/unknown-status deferral, cancellation for returning input, new capture/live preemption with preserved frames, stale-running recovery from encrypted checkpoints, pause/resume/cancel, singleton execution, idempotent enqueue/completion, failure isolation, version selection, and queue API authorization/cross-origin denial. `queue-cuda-smoke` separately exercises real provisioned large-v3 inference and revision assembly with generated tone/silence and controlled eligibility inputs. It is not a recognition-quality or real-idle benchmark.
+Generated-audio integration tests exercise active-input/CPU/battery/unknown-status deferral, GPU load/VRAM admission, cancellation for new outside GPU load or critical VRAM pressure, self-utilization exclusion, legacy policy migration, returning input, new capture/live preemption with preserved frames, stale-running recovery from encrypted checkpoints, pause/resume/cancel, singleton execution, idempotent enqueue/completion, failure isolation, version selection, and queue API authorization/cross-origin denial. `queue-cuda-smoke --gpu-check` exercises real provisioned large-v3 inference with actual GPU guards on generated tone/silence and controlled non-GPU eligibility inputs. It is not a recognition-quality or real-idle benchmark.

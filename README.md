@@ -8,6 +8,7 @@ SaidNest is an open-source project for local audio capture, transcription, and a
 - Interactive preview: [saidnest.com/app/](https://saidnest.com/app/)
 - [Architecture](docs/ARCHITECTURE.md), [roadmap](docs/ROADMAP.md), and [plan review](docs/PLAN_REVIEW.md)
 - [Local model comparison and refinement](docs/MODEL_EVALUATION.md), [Speakr/WhisperX review](docs/SPEAKR_REVIEW.md)
+- [Idle refinement and GPU policy](docs/REFINEMENT_QUEUE.md), [Windows background auto-start](docs/WINDOWS_AUTOSTART.md)
 
 ## Current release
 

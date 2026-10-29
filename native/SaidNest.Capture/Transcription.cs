@@ -122,7 +122,7 @@ static partial class Transcription
         return install;
     }
 
-    public static async Task<TrackTranscript> Decode(EngineInstall install, RenderedAudio audio, string trackId, CancellationToken cancellationToken = default, bool bypassQuietGuard=false)
+    public static async Task<TrackTranscript> Decode(EngineInstall install, RenderedAudio audio, string trackId, CancellationToken cancellationToken = default, bool bypassQuietGuard=false,bool background=false)
     {
         try
         {
@@ -145,6 +145,8 @@ static partial class Transcription
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(TimeSpan.FromMinutes(2));
             using var process = Process.Start(settings) ?? throw new IOException("Local inference process did not start.");
+            using var ownership=background?GpuOwnership.Register(process.Id):null;
+            if(background) {try {process.PriorityClass=ProcessPriorityClass.BelowNormal;}catch(System.ComponentModel.Win32Exception) { }}
             try
             {
                 var stdout = ReadLimited(process.StandardOutput, 2 * 1024 * 1024, timeout.Token);

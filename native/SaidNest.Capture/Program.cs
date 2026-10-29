@@ -17,8 +17,8 @@ static class Program
             if (command == "devices") { Console.WriteLine(JsonSerializer.Serialize(Recorder.Devices(), Vault.Json)); return 0; }
             if (command == "output-activity") { Console.WriteLine(JsonSerializer.Serialize(await Recorder.OutputActivity(), Vault.Json)); return 0; }
             if (command == "integration-test") { await IntegrationTests.Run(Option("--out") ?? ".saidnest/integration-tests"); return 0; }
-            if(command=="queue-cuda-smoke") {await RefinementQueueTests.CudaSmoke(Path.GetFullPath(Option("--out") ?? ".saidnest/queue-cuda-tests"),Path.GetFullPath(Option("--install") ?? ".saidnest/inference/install.json"));return 0;}
-            if(command=="idle-status") {var environment=new IdleEnvironment();environment.Read();await Task.Delay(1000);Console.WriteLine(JsonSerializer.Serialize(environment.Read(),Vault.Json));return 0;}
+            if(command=="queue-cuda-smoke") {await RefinementQueueTests.CudaSmoke(Path.GetFullPath(Option("--out") ?? ".saidnest/queue-cuda-tests"),Path.GetFullPath(Option("--install") ?? ".saidnest/inference/install.json"),args.Contains("--gpu-check"));return 0;}
+            if(command=="idle-status") {using var environment=new IdleEnvironment();environment.Read();await Task.Delay(1100);Console.WriteLine(JsonSerializer.Serialize(environment.Read(),Vault.Json));return 0;}
             if(command is "queue-refinement" or "refinement-queue" or "refinement-policy" or "refinement-worker") {
                 using var vault=Vault.Open(root);
                 if(command=="queue-refinement")Console.WriteLine(JsonSerializer.Serialize(RefinementQueue.Summary(RefinementQueue.Enqueue(vault,Option("--session") ?? throw new ArgumentException("Select --session ID."),Option("--install") ?? ".saidnest/inference/install.json",Option("--model") ?? RefinementQueue.Policy(vault).Model)),Vault.Json));
@@ -26,6 +26,9 @@ static class Program
                     var policy=RefinementQueue.Policy(vault);
                     if(Option("--idle-seconds") is {} idle)policy=policy with {IdleSeconds=int.Parse(idle)};
                     if(Option("--max-cpu") is {} cpu)policy=policy with {MaxCpuBusyFraction=double.Parse(cpu,System.Globalization.CultureInfo.InvariantCulture)};
+                    if(Option("--max-gpu") is {} gpu)policy=policy with {MaxGpuBusyFraction=double.Parse(gpu,System.Globalization.CultureInfo.InvariantCulture)};
+                    if(Option("--gpu-free-mib") is {} free)policy=policy with {MinGpuFreeMiB=int.Parse(free)};
+                    if(Option("--gpu-running-free-mib") is {} runningFree)policy=policy with {MinRunningGpuFreeMiB=int.Parse(runningFree)};
                     if(Option("--model") is {} model)policy=policy with {Model=model};
                     if(args.Contains("--disable"))policy=policy with {Enabled=false};if(args.Contains("--enable"))policy=policy with {Enabled=true};
                     if(args.Contains("--allow-battery"))policy=policy with {RequireAcPower=false};if(args.Contains("--require-ac"))policy=policy with {RequireAcPower=true};

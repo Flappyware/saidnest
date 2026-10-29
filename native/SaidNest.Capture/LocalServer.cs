@@ -16,6 +16,7 @@ sealed record RefineRequest(string Model);
 sealed record RevisionRequest(string Id);
 sealed record ReferenceRequest(string Text,bool Verified);
 sealed record QueueControl(string Action);
+sealed record ServiceIdentity(int Pid,string StartTicks);
 
 static class LocalServer
 {
@@ -160,14 +161,32 @@ static class LocalServer
 
     public static async Task Run(Vault vault, string publicRoot, string install, int port, bool openBrowser, bool fixture = false)
     {
+        using var serviceLease=InferencePriority.TryAcquire(vault,"local-service.lock") ?? throw new InvalidOperationException("A local service is already running for this vault.");
         var server = Create(vault, publicRoot, install, port, fixture);
         await server.App.StartAsync();
+        using var currentProcess=Process.GetCurrentProcess();
+        string processMarker=Path.Combine(vault.Root,"service-process.json");
+        var identity=new ServiceIdentity(Environment.ProcessId,currentProcess.StartTime.ToUniversalTime().Ticks.ToString());
         // Browser bootstrap credentials stay out of console logs and query strings.
         string url = server.Origin + "/app/#key=" + server.Token;
         vault.Write($"ui-{Guid.NewGuid():N}.snu", new { url });
+        Vault.AtomicWrite(processMarker,JsonSerializer.SerializeToUtf8Bytes(identity,Vault.Json),replace:true);
+        string stopMarker=Path.Combine(vault.Root,"service-stop.json");
+        var stopWatcher=Task.Run(async()=> {
+            while(!server.App.Lifetime.ApplicationStopping.IsCancellationRequested) {
+                try {
+                    if(File.Exists(stopMarker) && JsonSerializer.Deserialize<ServiceIdentity>(File.ReadAllBytes(stopMarker),Vault.Json)==identity){server.App.Lifetime.StopApplication();return;}
+                    await Task.Delay(200,server.App.Lifetime.ApplicationStopping);
+                }catch(OperationCanceledException)when(server.App.Lifetime.ApplicationStopping.IsCancellationRequested){return;}
+                catch(Exception ex)when(ex is IOException or JsonException){await Task.Delay(200);}
+            }
+        });
         if (openBrowser) Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
         Console.WriteLine($"SaidNest local timeline is running on {server.Origin}. Private access opened locally; press Ctrl+C to stop.");
         await server.App.WaitForShutdownAsync();
+        await stopWatcher;
         await server.App.DisposeAsync();
+        File.Delete(processMarker);
+        if(File.Exists(stopMarker))File.Delete(stopMarker);
     }
 }

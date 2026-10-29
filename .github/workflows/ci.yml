@@ -28,3 +28,4 @@ jobs:
       - run: dotnet build native/SaidNest.Capture -c Release --no-restore
       - run: dotnet run --project native/SaidNest.Capture -c Release --no-build -- self-test
       - run: dotnet run --project native/SaidNest.Capture -c Release --no-build -- integration-test
+      - run: ./scripts/windows/test-background.ps1

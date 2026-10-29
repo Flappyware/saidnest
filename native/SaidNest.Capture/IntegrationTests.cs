@@ -92,7 +92,40 @@ static class IntegrationTests
             Check((await client.PostAsync($"/api/local/sessions/{id}/queue-refinement",new StringContent("{\"model\":\"../unknown\"}",System.Text.Encoding.UTF8,"application/json"))).StatusCode==HttpStatusCode.UnprocessableEntity,"queue accepts provisioned profile names only");
         }
         finally { await server.App.StopAsync(); await server.App.DisposeAsync(); }
+        await CheckServiceLifecycle(vault,queueProfile,port);
         Console.WriteLine("Passed: pause-aligned WAV, pause diagnostics, bounded transcript timestamps, private API/audio authentication, no-store responses, cross-origin denial, Host validation, and static vault-file denial. Synthetic fixtures only.");
+    }
+
+    static async Task CheckServiceLifecycle(Vault vault,string profile,int port)
+    {
+        System.Diagnostics.Process Start() {
+            var info=new System.Diagnostics.ProcessStartInfo(Environment.ProcessPath!){UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true};
+            if(string.Equals(Path.GetFileNameWithoutExtension(Environment.ProcessPath),"dotnet",StringComparison.OrdinalIgnoreCase))info.ArgumentList.Add(typeof(IntegrationTests).Assembly.Location);
+            foreach(string argument in new[]{"serve","--no-open","--vault",vault.Root,"--public",Path.GetFullPath("public"),"--install",profile,"--port",port.ToString()})info.ArgumentList.Add(argument);
+            return System.Diagnostics.Process.Start(info)!;
+        }
+        using var service=Start();
+        var output=service.StandardOutput.ReadToEndAsync();var error=service.StandardError.ReadToEndAsync();
+        try {
+            string ready=Path.Combine(vault.Root,"service-process.json");
+            using var deadline=new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            while(!File.Exists(ready) && !service.HasExited)await Task.Delay(50,deadline.Token);
+            Check(!service.HasExited && File.Exists(ready),"native ready marker is published");
+            var identity=JsonSerializer.Deserialize<ServiceIdentity>(File.ReadAllBytes(ready),Vault.Json)!;
+            Check(identity.Pid==service.Id && Directory.GetFiles(vault.Root,"ui-*.snu").Length>0,"ready marker follows encrypted browser bootstrap");
+            using var client=new HttpClient();Check((await client.GetAsync($"http://127.0.0.1:{port}/api/local/health",deadline.Token)).StatusCode==HttpStatusCode.Unauthorized,"background listener remains authenticated");
+            using(var duplicate=Start()) {
+                await duplicate.WaitForExitAsync(deadline.Token);
+                Check(duplicate.ExitCode!=0 && !service.HasExited,"duplicate native service cannot replace the owner");
+            }
+            Vault.AtomicWrite(Path.Combine(vault.Root,"service-stop.json"),JsonSerializer.SerializeToUtf8Bytes(identity with {StartTicks="0"},Vault.Json),replace:true);
+            await Task.Delay(300,deadline.Token);Check(!service.HasExited,"stale shutdown request is ignored");
+            Vault.AtomicWrite(Path.Combine(vault.Root,"service-stop.json"),JsonSerializer.SerializeToUtf8Bytes(identity,Vault.Json),replace:true);
+            await service.WaitForExitAsync(deadline.Token);
+            Check(service.ExitCode==0 && !File.Exists(ready),"identity-bound shutdown cancels the background worker and removes readiness");
+            await output;await error;
+            Console.WriteLine("Passed: native background readiness, authenticated listener, duplicate prevention, stale-stop rejection and graceful shutdown.");
+        }finally {if(!service.HasExited){service.Kill(true);await service.WaitForExitAsync();}}
     }
 
     static async Task CheckQuality(Vault vault,string id)

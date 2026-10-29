@@ -2,9 +2,9 @@ using System.Runtime.InteropServices;
 
 namespace SaidNest.Capture;
 
-sealed record IdleSample(double? InputIdleSeconds,double? CpuBusyFraction,bool? OnAcPower);
+sealed record IdleSample(double? InputIdleSeconds,double? CpuBusyFraction,bool? OnAcPower,GpuSample? Gpu=null);
 
-sealed class IdleEnvironment
+sealed class IdleEnvironment:IDisposable
 {
     [StructLayout(LayoutKind.Sequential)] struct LastInput { public uint Size,Time; }
     [StructLayout(LayoutKind.Sequential)] struct Power { public byte Ac,Battery,Percent,Saver; public uint Remaining,Full; }
@@ -12,7 +12,8 @@ sealed class IdleEnvironment
     [DllImport("kernel32.dll")] static extern bool GetSystemTimes(out ulong idle,out ulong kernel,out ulong user);
     [DllImport("kernel32.dll")] static extern bool GetSystemPowerStatus(out Power power);
     ulong? previousTotal,previousIdle;
-    public IdleSample Read()
+    readonly GpuActivity gpu=new();
+    public IdleSample Read(bool includeGpu=true)
     {
         var input=new LastInput {Size=(uint)Marshal.SizeOf<LastInput>()};
         double? idle=null;
@@ -29,6 +30,9 @@ sealed class IdleEnvironment
             previousTotal=total; previousIdle=systemIdle;
         }
         bool? ac=GetSystemPowerStatus(out var power) && power.Ac!=255?power.Ac==1:null;
-        return new(idle,busy,ac);
+        return new(idle,busy,ac,includeGpu?gpu.Read():null);
     }
+    public GpuSample ReadGpu()=>gpu.Read();
+    public void ReleaseGpu()=>gpu.Suspend();
+    public void Dispose()=>gpu.Dispose();
 }

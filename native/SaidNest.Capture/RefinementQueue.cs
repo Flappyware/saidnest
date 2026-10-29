@@ -3,7 +3,7 @@ using System.Text.Json;
 
 namespace SaidNest.Capture;
 
-sealed record RefinementPolicy(bool Enabled=true,bool QueueNewRecordings=true,string Model="large-v3",int IdleSeconds=120,double MaxCpuBusyFraction=.25,bool RequireAcPower=true);
+sealed record RefinementPolicy(bool Enabled=true,bool QueueNewRecordings=true,string Model="large-v3",int IdleSeconds=120,double MaxCpuBusyFraction=.25,bool RequireAcPower=true,double MaxGpuBusyFraction=.10,int MinGpuFreeMiB=6144,int MinRunningGpuFreeMiB=1024);
 sealed record RefinementJob(int Version,string Id,string SessionId,string Model,string State,string Notice,DateTimeOffset CreatedUtc,DateTimeOffset UpdatedUtc,string SourceManifestHash,string? ParentRevisionId,string RevisionId,EngineInstall Install,int CompletedWindows=0,double ProcessedSeconds=0,double TotalSeconds=0);
 sealed record RefinementWindow(string JobId,string SourceManifestHash,string ModelSha256,string Track,int Index,double Start,double Seconds,string AudioSha256,TrackTranscript Transcript);
 sealed class RefinementPreparation
@@ -23,7 +23,7 @@ static class RefinementQueue
     public static RefinementPolicy Policy(Vault vault)=>File.Exists(Path.Combine(vault.Root,Folder,"policy.snq"))?vault.Read($"{Folder}/policy.snq").Metadata.Deserialize<RefinementPolicy>(Vault.Json)!:new();
     public static void SetPolicy(Vault vault,RefinementPolicy policy)
     {
-        if(policy.IdleSeconds is < 10 or > 86400 || !double.IsFinite(policy.MaxCpuBusyFraction) || policy.MaxCpuBusyFraction is < .01 or > 1 || !ModelProfiles.Names.Contains(policy.Model,StringComparer.Ordinal))throw new ArgumentException("Invalid refinement policy.");
+        if(policy.IdleSeconds is < 10 or > 86400 || !double.IsFinite(policy.MaxCpuBusyFraction) || policy.MaxCpuBusyFraction is < .01 or > 1 || !ModelProfiles.Names.Contains(policy.Model,StringComparer.Ordinal) || !double.IsFinite(policy.MaxGpuBusyFraction) || policy.MaxGpuBusyFraction is < 0 or > 1 || policy.MinGpuFreeMiB is <1024 or >131072 || policy.MinRunningGpuFreeMiB<256 || policy.MinRunningGpuFreeMiB>policy.MinGpuFreeMiB)throw new ArgumentException("Invalid refinement policy.");
         using var gate=Lock(vault);vault.Replace($"{Folder}/policy.snq",policy);
     }
     static FileStream Lock(Vault vault)
@@ -64,6 +64,9 @@ static class RefinementQueue
         if(sample.InputIdleSeconds is not {} idle || idle<policy.IdleSeconds)return "Waiting for the computer to be idle.";
         if(policy.RequireAcPower && sample.OnAcPower!=true)return "Waiting for AC power.";
         if(admission && (sample.CpuBusyFraction is not {} cpu || cpu>policy.MaxCpuBusyFraction))return "Waiting for CPU headroom.";
+        if(sample.Gpu?.ForeignBusyFraction is not {} gpu || !double.IsFinite(gpu) || gpu is <0 or >1 || sample.Gpu.TotalBusyFraction is not {} totalGpu || !double.IsFinite(totalGpu) || totalGpu is <0 or >1 || sample.Gpu.FreeMemoryMiB is not {} free || free<0)return "Waiting for reliable GPU activity and memory readings.";
+        if(gpu>policy.MaxGpuBusyFraction || (admission && !sample.Gpu.OwnDecoderActiveOrRecent && totalGpu>policy.MaxGpuBusyFraction))return "Another application is using the GPU; refinement is deferred.";
+        if(free<(admission?policy.MinGpuFreeMiB:policy.MinRunningGpuFreeMiB))return "Waiting for GPU memory headroom.";
         return null;
     }
     static string WindowPath(RefinementJob job,string track,int index)=>$"{Folder}/{job.Id}/{track}-{index:D8}.snq";
@@ -134,7 +137,7 @@ static class RefinementQueue
                 var audio=indexes[work.Track].Render(work.Start,work.Seconds);
                 string audioHash=Convert.ToHexString(SHA256.HashData(audio.Wav)).ToLowerInvariant();
                 try {
-                    var decoded=testDecoder==null?await Transcription.Decode(install,audio,work.Track,windowCancellation.Token):await testDecoder(audio,work.Track,windowCancellation.Token);
+                    var decoded=testDecoder==null?await Transcription.Decode(install,audio,work.Track,windowCancellation.Token,background:true):await testDecoder(audio,work.Track,windowCancellation.Token);
                     windowCancellation.Token.ThrowIfCancellationRequested();
                     var checkpoint=new RefinementWindow(job.Id,job.SourceManifestHash,install.ModelSha256,work.Track,work.Index,work.Start,work.Seconds,audioHash,decoded);
                     using(var gate=Lock(vault)) {
@@ -175,10 +178,16 @@ static class RefinementQueue
     }
     public static async Task Run(Vault vault,CancellationToken token)
     {
-        var environment=new IdleEnvironment();
+        using var environment=new IdleEnvironment();
+        IdleSample Resources() {
+            var sample=environment.Read(includeGpu:false);var policy=Policy(vault);
+            if(policy.Enabled && sample.InputIdleSeconds>=policy.IdleSeconds && (!policy.RequireAcPower || sample.OnAcPower==true) && !InferencePriority.ForegroundActive(vault))return sample with {Gpu=environment.ReadGpu()};
+            // Avoid waking a laptop's discrete GPU while the owner is active or on battery.
+            environment.ReleaseGpu();return sample;
+        }
         var preparation=new RefinementPreparation();
         while(!token.IsCancellationRequested) {
-            try {bool advanced=await Step(vault,environment.Read,token,preparation:preparation);if(!advanced)preparation.Clear();await Task.Delay(advanced?100:2000,token);}
+            try {bool advanced=await Step(vault,Resources,token,preparation:preparation);if(!advanced)preparation.Clear();await Task.Delay(advanced?100:2000,token);}
             catch(OperationCanceledException)when(token.IsCancellationRequested) {break;}
             catch(Exception ex)when(ex is IOException or InvalidDataException or CryptographicException or JsonException) { await Task.Delay(2000); }
         }
