@@ -4,11 +4,21 @@ Implemented October 28, 2026. All meeting audio, hypotheses, references, and rev
 
 ## Two passes, separate evidence
 
-The live worker uses the selected model for four-second drafts and eight-second final windows. `tiny.en` remains the default. A later refinement runs the original audio through a selected model in bounded thirty-second windows, creates a new encrypted revision, and retains the live version. A larger model is a candidate, not automatically the most accurate choice.
+Live transcription prioritizes the lightest model that produces useful provisional text while keeping capture and normal computer use responsive. `tiny.en` is the lightest currently provisioned profile and remains the default; a larger GPU is not a reason to promote the live model automatically. Continue evaluating lighter or more efficient streaming candidates using measured latency, memory, power use, and minimum useful recognition quality.
+
+High-quality refinement is a separate, deferrable job over the original audio. `large-v3` is the current candidate based on the small checked sample, not a permanent claim of best accuracy. Refinement uses bounded thirty-second windows, creates a new encrypted revision, and retains the live version. Model promotion requires checked evidence rather than model size alone.
+
+Planned opportunistic scheduling should use a durable local queue and owner preferences for idle time, available compute, power/charging, and optional schedules. Capture and live transcription take priority; refinement must yield at a checkpoint when they need resources, survive restart, and remain manually runnable or deferrable. Models should be loaded only while needed and released afterward. This scheduler and resumable refinement are not implemented yet: today, refinement is explicitly started in the timeline or requested immediately after recording through the launcher.
 
 The local timeline has a **Transcript version** selector, a **Refinement model** selector, **Create refined version**, and **Review accuracy**. The chosen refinement becomes the displayed version; selecting an earlier version restores it without deleting either revision. Revisions retain model hash/revision, runtime, decoding settings, window size, parent revision, and the source manifest hash where available. Older prototype revisions may lack newer fields.
 
-To provision a pinned model and record with automatic later refinement:
+For the normal lightweight live path, record without requesting immediate refinement:
+
+```powershell
+./scripts/windows/start-recorder.ps1 -Live -Seconds 900
+```
+
+When convenient, provision the high-quality model and use **Create refined version** in the local timeline. An explicit development option can instead run refinement immediately after capture; it does not wait for idle time:
 
 ```powershell
 ./scripts/windows/provision-whisper.ps1 -Model large-v3

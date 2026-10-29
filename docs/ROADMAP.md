@@ -28,7 +28,9 @@ Gate: recording and saved audio survive an application/repository restart, infer
 
 ## Local alpha
 
-The development slice now supports selected live and refinement models, immutable transcript versions, frozen multi-model comparisons, and encrypted owner-checked references for WER. Timings, model disagreement, synthetic smoke accuracy, and checked meeting accuracy are separate evidence. See [model evaluation](MODEL_EVALUATION.md). A persistent worker, representative references, and a supervised larger-model live trial remain qualification gates; [WhisperX alignment/diarization](SPEAKR_REVIEW.md) is a later optional pass.
+The development slice now supports selected live and refinement models, immutable transcript versions, frozen multi-model comparisons, and encrypted owner-checked references for WER. Live transcription should use the lightest useful model; `tiny.en` remains the default. High-quality refinement runs separately when convenient. Timings, model disagreement, synthetic smoke accuracy, and checked meeting accuracy are separate evidence. See [model evaluation](MODEL_EVALUATION.md). A persistent worker, representative references, a clean lightweight live baseline, and a durable opportunistic refinement queue remain qualification work; [WhisperX alignment/diarization](SPEAKR_REVIEW.md) is a later optional pass.
+
+The planned refinement queue must respect idle/compute/power preferences, yield to capture and live text at a checkpoint, resume after restart, and offer manual run/defer controls. The current prototype supports manual refinement and explicitly requested immediate post-recording refinement; automatic idle scheduling and resumable jobs are not yet implemented.
 
 Status: Planned; builds on the first Windows slice.
 

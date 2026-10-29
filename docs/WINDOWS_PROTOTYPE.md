@@ -106,7 +106,7 @@ The `integration-test` command uses synthetic PCM and fictional text to verify p
 
 ## Real-time transcription during recording
 
-Model selection, post-recording refinement, frozen comparisons and checked-reference scoring are described in [Model evaluation](MODEL_EVALUATION.md). The recording launcher supports `-LiveModel` and `-RefineModel`; the former defaults to `tiny.en`, while the latter is optional. The older ten-minute post-transcription limit described earlier has been replaced for refinement by bounded thirty-second windows; the original whole-recording CLI player still has its separate ten-minute limit.
+Model selection, post-recording refinement, frozen comparisons and checked-reference scoring are described in [Model evaluation](MODEL_EVALUATION.md). Live transcription prioritizes the lightest useful model. The recording launcher supports `-LiveModel` and `-RefineModel`; the former defaults to `tiny.en`, while the latter is optional and requests immediate refinement after capture, without checking whether the computer is idle. Omit `-RefineModel` for the normal lightweight recording path and start high-quality refinement manually when convenient. Automatic opportunistic scheduling remains planned. The older ten-minute post-transcription limit described earlier has been replaced for refinement by bounded thirty-second windows; the original whole-recording CLI player still has its separate ten-minute limit.
 
 Double-click `Start-Live-SaidNest.cmd`, or run:
 
