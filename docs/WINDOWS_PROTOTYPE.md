@@ -92,6 +92,8 @@ The standard-library Python benchmark runs the same generated speech/silence inp
 
 ## Next qualification gates
 
+An owner-authorized fifteen-minute two-source meeting run completed with rolling text on both tracks, verified final audio manifests, valid transcript timestamp ranges, and authenticated playback of the final minute. Five device discontinuity flags were retained; the three non-startup microphone flags had zero device-frame gaps. This is a single development run, with no reference transcript or recognition accuracy score. Private content and detailed operating evidence remain outside the public repository.
+
 1. Extend short owner-recording evidence to representative two-source speech and interruption feedback. A short local capture, pause/resume, playback, and encrypted transcript/timeline path now work; system output speech quality is not established.
 2. Test a 60-minute meeting, driver/device failures, sleep/resume, disk pressure, queue saturation, and forced shutdown while audio is arriving; measure drift and retained/lost boundaries.
 3. Build a permitted, annotated meeting corpus and compare the planned streaming engine with portable Whisper recognition. Select a model only after quality, silence, memory, provisional latency, finalization and concurrent-source measurements.
