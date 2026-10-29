@@ -1,6 +1,6 @@
 # SaidNest Architecture
 
-SaidNest separates capture, storage, compute, and connectivity. These are the planned architecture boundaries; the first deployed release is a website and sample timeline, not the complete recording system.
+SaidNest separates capture, storage, compute, and connectivity. These are the planned architecture boundaries; the deployed release is a website and sample timeline. A separate Windows development slice now connects encrypted saved recordings, experimental local inference, and an authenticated loopback timeline; see [prototype limits](WINDOWS_PROTOTYPE.md).
 
 ```mermaid
 flowchart LR

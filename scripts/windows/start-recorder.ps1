@@ -47,4 +47,4 @@ if ($captureOutput) { $captureArguments += @('--output', $captureOutput) }
 Write-Host "`nRecording starts now. P pauses/resumes. Q stops. Audio stays in the local encrypted vault."
 & $captureExe @captureArguments
 if ($LASTEXITCODE -ne 0) { throw 'Recording was interrupted. Use the sessions command to inspect saved chunks.' }
-Write-Host "`nRecording is saved locally. Transcription is not connected to this recorder yet."
+Write-Host "`nRecording is saved locally. Open Start-Local-SaidNest.cmd to play it and create a local transcript."

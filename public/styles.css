@@ -153,6 +153,16 @@ p { text-wrap: pretty; }
 .copy-passage:hover { background: var(--selected); color: var(--ink); }
 mark { color: var(--ink); background: var(--highlight); border-radius: 2px; }
 .transcript-end { color: var(--muted); font-size: 13px; line-height: 1.55; margin-top: 32px; max-width: 62ch; }
+.local-player { display: grid; grid-template-columns: auto minmax(130px, 1fr); align-items: center; gap: 12px; margin-top: 24px; }
+.local-player label { font-size: 14px; }
+.local-player select { background: var(--white); border: 1px solid var(--control); border-radius: 6px; min-height: 40px; padding: 8px; color: var(--ink); font-size: 14px; }
+.local-player audio { width: 100%; grid-column: 1 / -1; }
+.local-player > p, .recording-diagnostics, .local-model-note, .local-empty-transcript { font-size: 13px; color: var(--muted); line-height: 1.55; }
+.local-player > p { grid-column: 1 / -1; }
+.recording-diagnostics { margin-top: 16px; }
+.local-model-note { margin: -8px 0 24px; }
+.seek-passage { border: 0; background: transparent; padding: 5px 0; align-self: start; min-height: 32px; text-decoration: underline; text-underline-offset: 4px; }
+.seek-passage:hover { color: var(--ink); }
 .workspace-footnote { color: var(--muted); font-size: 13px; margin-top: 24px; }
 .empty-state { padding: 28px 12px; font-size: 14px; }
 .empty-state h2, .empty-state h3 { font-size: 18px; font-weight: 500; }
@@ -254,6 +264,7 @@ mark { color: var(--ink); background: var(--highlight); border-radius: 2px; }
   .segment .timestamp { padding-top: 12px; }
   .segment-heading { min-height: 44px; }
   .copy-passage { min-height: 44px; padding-inline: 12px; }
+  .seek-passage { min-height: 44px; }
   .workspace-footnote { font-size: 12px; }
 }
 @media (max-width: 520px) {

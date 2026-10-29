@@ -10,7 +10,7 @@
     "dev": "node scripts/dev.mjs",
     "preview": "node scripts/dev.mjs --built",
     "build": "node scripts/build.mjs",
-    "check": "node --check src/worker.js && node --check public/app.js && node --check public/site.js && node --check public/samples.js",
+    "check": "node --check src/worker.js && node --check public/app.js && node --check public/local.js && node --check public/site.js && node --check public/samples.js",
     "test": "node --test"
   }
 }

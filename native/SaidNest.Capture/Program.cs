@@ -15,6 +15,42 @@ static class Program
             string? Option(string name) { int index = Array.IndexOf(args, name); return index >= 0 && index + 1 < args.Length ? args[index + 1] : null; }
             string root = Path.GetFullPath(Option("--vault") ?? ".saidnest/vault");
             if (command == "devices") { Console.WriteLine(JsonSerializer.Serialize(Recorder.Devices(), Vault.Json)); return 0; }
+            if (command == "integration-test") { await IntegrationTests.Run(Option("--out") ?? ".saidnest/integration-tests"); return 0; }
+            if (command == "serve-fixture")
+            {
+                string fixtureRoot = Path.Combine(Option("--out") ?? ".saidnest/ui-fixtures", Guid.NewGuid().ToString("N"));
+                using var fixtureVault = Vault.Create(fixtureRoot, Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)));
+                await IntegrationTests.Fixture(fixtureVault);
+                await LocalServer.Run(fixtureVault, Path.GetFullPath("public"), Path.GetFullPath(".saidnest/inference/install.json"), int.Parse(Option("--port") ?? "8789"), true, fixture: true);
+                return 0;
+            }
+            if (command == "serve")
+            {
+                using var vault = Vault.Open(root);
+                await LocalServer.Run(vault, Path.GetFullPath(Option("--public") ?? "public"), Path.GetFullPath(Option("--install") ?? ".saidnest/inference/install.json"),
+                    int.Parse(Option("--port") ?? "8788"), !args.Contains("--no-open"));
+                return 0;
+            }
+            if (command == "transcribe")
+            {
+                using var vault = Vault.Open(root);
+                var revision = await Transcription.Run(vault, Option("--session") ?? throw new ArgumentException("Specify --session ID."), Option("--install") ?? ".saidnest/inference/install.json");
+                Console.WriteLine(JsonSerializer.Serialize(new { revision.SessionId, revision.Id, tracks = revision.Tracks.Select(track => new { track.Track, track.State, segments = track.Segments.Length, track.Notice }) }, Vault.Json));
+                return 0;
+            }
+            if (command == "diagnose")
+            {
+                using var vault = Vault.Open(root);
+                Console.WriteLine(JsonSerializer.Serialize(Diagnostics.Analyze(vault, Option("--session") ?? throw new ArgumentException("Specify --session ID.")), Vault.Json));
+                return 0;
+            }
+            if (command == "play")
+            {
+                using var vault = Vault.Open(root);
+                await TimelineAudio.Play(vault, Option("--session") ?? throw new ArgumentException("Specify --session ID."),
+                    Option("--track") ?? "mic", double.Parse(Option("--start") ?? "0", System.Globalization.CultureInfo.InvariantCulture), int.Parse(Option("--seconds") ?? "10"));
+                return 0;
+            }
             if (command == "probe-mic") { Console.WriteLine(JsonSerializer.Serialize(await Recorder.Probe(Option("--mic") ?? throw new ArgumentException("Select --mic ID or default.")), Vault.Json)); return 0; }
             if (command == "self-test") { await SelfTests.Run(Option("--out") ?? ".saidnest/tests"); return 0; }
             if (command == "corpus") { Corpus.Generate(Option("--out") ?? ".saidnest/corpus/en-synthetic-v0"); return 0; }
@@ -87,13 +123,19 @@ static class Program
                   record --mic default --output default [--seconds 600] [--vault PATH]
                   sessions [--vault PATH]          Verify saved sessions; missing final manifests show interrupted
                   inspect --session ID [--vault PATH]
+                  diagnose --session ID            Check levels, flags, and intentional pause gaps
+                  play --session ID --track mic|output [--start 0] [--seconds 10]
+                  transcribe --session ID           Save an encrypted local English transcript revision
+                  serve [--port 8788]               Open the authenticated loopback-only timeline
                   export --session ID --track mic|output --out FILE.wav [--vault PATH]
                   restore-unlock [--vault PATH]    Restore local unlock using recovery passphrase
                   corpus [--out NEW_DIRECTORY]    Generate English synthetic development audio
                   self-test [--out DIRECTORY]     Crypto, recovery, corruption, and process-crash checks
+                  integration-test                Synthetic timeline, parser, and local API checks
                   smoke-loopback [--out DIRECTORY]  Four-second generated-tone capture, no microphone
                 Sources must be explicitly selected. Omit --mic or --output to exclude that source.
-                No cloud, transcription model, automatic source switching, or background recording.
+                Local transcription requires the separately provisioned experimental CUDA model.
+                Playback/transcription support stopped recordings up to ten minutes. No cloud is required.
                 """);
             return command == "help" ? 0 : 1;
         }

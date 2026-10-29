@@ -12,7 +12,7 @@ SaidNest is an open-source project for local audio capture, transcription, and a
 
 The deployed release contains the public website, an interactive timeline using fictional sample conversations, and a Cloudflare Worker health endpoint. Search, transcript selection, clipboard copy, and transcript downloads work in the preview. The preview does not request microphone access, accept uploads, or persist transcript content.
 
-A separate [Windows recording prototype](docs/WINDOWS_PROTOTYPE.md) now provides explicit source selection, encrypted audio chunks, and crash-recovery inspection locally. Start it with `Start-SaidNest.cmd`. It is a development recorder, not a local alpha release. Model smoke benchmarks are separate; transcription is not connected to saved recordings or the timeline. Pairing, product authentication, sync, and billing remain planned.
+A separate [Windows prototype](docs/WINDOWS_PROTOTYPE.md) provides explicit source selection, encrypted audio chunks, and crash-recovery inspection. Start recording with `Start-SaidNest.cmd`, then open `Start-Local-SaidNest.cmd` for authenticated local playback, experimental English transcription, search, and timestamped copy/export. The local integration supports stopped recordings up to ten minutes and requires the provisioned CUDA runtime for inference. It remains a development prototype; pairing, remote authentication, sync, and billing are planned.
 
 ## Development
 
