@@ -28,9 +28,9 @@ Gate: recording and saved audio survive an application/repository restart, infer
 
 ## Local alpha
 
-The development slice now supports selected live and refinement models, immutable transcript versions, frozen multi-model comparisons, and encrypted owner-checked references for WER. Live transcription should use the lightest useful model; `tiny.en` remains the default. High-quality refinement runs separately when convenient. Timings, model disagreement, synthetic smoke accuracy, and checked meeting accuracy are separate evidence. See [model evaluation](MODEL_EVALUATION.md). A persistent worker, representative references, a clean lightweight live baseline, and a durable opportunistic refinement queue remain qualification work; [WhisperX alignment/diarization](SPEAKR_REVIEW.md) is a later optional pass.
+The development slice now supports selected live and refinement models, immutable transcript versions, frozen multi-model comparisons, and encrypted owner-checked references for WER. Live transcription should use the lightest useful model; `tiny.en` remains the default. High-quality refinement runs separately when convenient. Timings, model disagreement, synthetic smoke accuracy, and checked meeting accuracy are separate evidence. See [model evaluation](MODEL_EVALUATION.md). A persistent worker, representative references, a clean lightweight live baseline, and sustained opportunistic refinement qualification remain open; [WhisperX alignment/diarization](SPEAKR_REVIEW.md) is a later optional pass.
 
-The planned refinement queue must respect idle/compute/power preferences, yield to capture and live text at a checkpoint, resume after restart, and offer manual run/defer controls. The current prototype supports manual refinement and explicitly requested immediate post-recording refinement; automatic idle scheduling and resumable jobs are not yet implemented.
+The [refinement queue](REFINEMENT_QUEUE.md) now supports encrypted jobs/window checkpoints, idle/CPU/AC admission, cancellation and lock release for recording/live text or returning input, restart resume, and pause/resume/cancel controls. GPU-load and memory admission, optional time schedules, startup integration, and sustained real-meeting qualification remain open.
 
 Status: Planned; builds on the first Windows slice.
 

@@ -8,9 +8,9 @@ Live transcription prioritizes the lightest model that produces useful provision
 
 High-quality refinement is a separate, deferrable job over the original audio. `large-v3` is the current candidate based on the small checked sample, not a permanent claim of best accuracy. Refinement uses bounded thirty-second windows, creates a new encrypted revision, and retains the live version. Model promotion requires checked evidence rather than model size alone.
 
-Planned opportunistic scheduling should use a durable local queue and owner preferences for idle time, available compute, power/charging, and optional schedules. Capture and live transcription take priority; refinement must yield at a checkpoint when they need resources, survive restart, and remain manually runnable or deferrable. Models should be loaded only while needed and released afterward. This scheduler and resumable refinement are not implemented yet: today, refinement is explicitly started in the timeline or requested immediately after recording through the launcher.
+The [opportunistic refinement queue](REFINEMENT_QUEUE.md) now waits for input idle time, low CPU admission load, AC power, and no foreground recording/transcription. Thirty-second windows checkpoint encrypted text; returning input or foreground work cancels an unfinished window and releases the model lock. Service restart resumes saved work. Optional time schedules, GPU-load admission, and Windows startup integration remain planned.
 
-The local timeline has a **Transcript version** selector, a **Refinement model** selector, **Create refined version**, and **Review accuracy**. The chosen refinement becomes the displayed version; selecting an earlier version restores it without deleting either revision. Revisions retain model hash/revision, runtime, decoding settings, window size, parent revision, and the source manifest hash where available. Older prototype revisions may lack newer fields.
+The local timeline has a **Transcript version** selector, a **Refinement model** selector, **Queue refinement**, pause/resume/cancel controls, and **Review accuracy**. Completion selects the new version only if the owner has not changed the selection since enqueueing. Selecting an earlier version restores it without deleting either revision. Revisions retain model hash/revision, runtime, decoding settings, window size, parent revision, and the source manifest hash where available. Older prototype revisions may lack newer fields.
 
 For the normal lightweight live path, record without requesting immediate refinement:
 
@@ -18,7 +18,7 @@ For the normal lightweight live path, record without requesting immediate refine
 ./scripts/windows/start-recorder.ps1 -Live -Seconds 900
 ```
 
-When convenient, provision the high-quality model and use **Create refined version** in the local timeline. An explicit development option can instead run refinement immediately after capture; it does not wait for idle time:
+Provision the high-quality model once. New recordings are queued automatically when the profile is available; `-RefineModel` overrides the queued model for this recording:
 
 ```powershell
 ./scripts/windows/provision-whisper.ps1 -Model large-v3

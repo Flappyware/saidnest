@@ -133,7 +133,7 @@ static class Archive
     }
     public static SessionInfo ReadSession(Vault vault, string id) => vault.Read($"sessions/{id}/session.snm").Metadata.Deserialize<SessionInfo>(Vault.Json) ?? throw new InvalidDataException("Missing session.");
 
-    public static Inspection Inspect(Vault vault, string id)
+    public static Inspection Inspect(Vault vault, string id, CancellationToken cancellationToken=default)
     {
         string folder = vault.SessionPath(id);
         List<string> issues = [];
@@ -154,6 +154,7 @@ static class Archive
             int discontinuities = 0, timestampErrors = 0;
             foreach (string path in Directory.EnumerateFiles(folder, "*.snc").Order(StringComparer.Ordinal))
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 string file = Path.GetFileName(path);
                 var obj = vault.Read($"sessions/{id}/{file}");
                 var chunk = obj.Metadata.Deserialize<ChunkInfo>(Vault.Json) ?? throw new InvalidDataException("Missing chunk metadata.");

@@ -15,6 +15,7 @@ sealed record LocalServerHandle(WebApplication App, string Token, string Origin)
 sealed record RefineRequest(string Model);
 sealed record RevisionRequest(string Id);
 sealed record ReferenceRequest(string Text,bool Verified);
+sealed record QueueControl(string Action);
 
 static class LocalServer
 {
@@ -30,6 +31,10 @@ static class LocalServer
         var app = builder.Build();
         var jobs = new SemaphoreSlim(1, 1);
         var audioGate = new SemaphoreSlim(1, 1);
+        Task? refinementWorker=null;
+        // Test fixtures never run real background inference or inspect owner activity.
+        if(!fixture)app.Lifetime.ApplicationStarted.Register(()=>refinementWorker=Task.Run(()=>RefinementQueue.Run(vault,app.Lifetime.ApplicationStopping)));
+        app.Lifetime.ApplicationStopped.Register(()=>refinementWorker?.GetAwaiter().GetResult());
         app.Use(async (context, next) =>
         {
             context.Response.Headers.CacheControl = "no-store";
@@ -66,10 +71,23 @@ static class LocalServer
             return new { id, state = inspection.State, session.StartedUtc, tracks = session.Tracks.Select(track => track.Id).ToArray(),
                 durationSeconds = diagnostic?.WallSeconds ?? Math.Max(0, (ChunkPump.QpcNow() - session.StartQpc100ns) / 10_000_000.0), events = diagnostic?.Events ?? [],
                 diagnosticFlags = diagnostic?.Tracks.SelectMany(track => track.Issues).ToArray() ?? [],
-                live = LiveTranscription.ReadStatus(vault, id), refinement=Transcription.ReadRefinement(vault,id), captureConditions=CaptureConditions.Read(vault,id), transcript = Transcription.Latest(vault, id) };
+                live = LiveTranscription.ReadStatus(vault, id), refinement=Transcription.ReadRefinement(vault,id), queueJob=RefinementQueue.Jobs(vault).Where(j=>j.SessionId==id).LastOrDefault() is {} queueJob?RefinementQueue.Summary(queueJob):null, captureConditions=CaptureConditions.Read(vault,id), transcript = Transcription.Latest(vault, id) };
         }
         app.MapGet("/api/local/health", () => Results.Json(new { local = true, fixture, model = "Local CUDA profiles, selected per job (experimental)", language = "en" }));
         app.MapGet("/api/local/models",()=>Results.Json(ModelProfiles.Available(installFile)));
+        app.MapGet("/api/local/refinement-queue",()=>Results.Json(new {policy=RefinementQueue.Policy(vault),jobs=RefinementQueue.Jobs(vault).Select(RefinementQueue.Summary)}));
+        app.MapPut("/api/local/refinement-queue/policy",async(HttpRequest request)=> {
+            var policy=await request.ReadFromJsonAsync<RefinementPolicy>() ?? throw new ArgumentException("Select queue preferences.");
+            RefinementQueue.SetPolicy(vault,policy);return Results.Json(policy);
+        });
+        app.MapPost("/api/local/refinement-queue/{jobId}",async(string jobId,HttpRequest request)=> {
+            var control=await request.ReadFromJsonAsync<QueueControl>() ?? throw new ArgumentException("Select a queue action.");
+            return Results.Json(RefinementQueue.Summary(RefinementQueue.Control(vault,jobId,control.Action)));
+        });
+        app.MapPost("/api/local/sessions/{id}/queue-refinement",async(string id,HttpRequest request)=> {
+            var selection=await request.ReadFromJsonAsync<RefineRequest>() ?? throw new ArgumentException("Select a model.");
+            var job=RefinementQueue.Enqueue(vault,id,installFile,selection.Model);return Results.Json(RefinementQueue.Summary(job),statusCode:202);
+        });
         app.MapGet("/api/local/sessions/{id}/revisions",(string id)=>Results.Json(Transcription.Revisions(vault,id).Select(r=>new {r.Id,r.CreatedUtc,r.Kind,model=Transcription.Name(r),passages=r.Tracks.Sum(t=>t.Segments.Length),r.ParentRevisionId,r.WindowSeconds})));
         app.MapPost("/api/local/sessions/{id}/revision",async(string id,HttpRequest request)=> {
             if(Archive.IsRecording(vault,id)) return Results.Conflict();
@@ -90,7 +108,7 @@ static class LocalServer
             Evaluation.SaveReference(vault,id,caseId,reference.Text,reference.Verified); return Results.Json(Evaluation.Review(vault,id));
         });
         app.MapGet("/api/local/sessions/{id}/live", (string id) => Results.Json(LiveTranscription.ReadStatus(vault, id)));
-        app.MapGet("/api/local/sessions/{id}/progress",(string id)=>Results.Json(new {refinement=Transcription.ReadRefinement(vault,id),transcript=Transcription.Latest(vault,id)}));
+        app.MapGet("/api/local/sessions/{id}/progress",(string id)=>Results.Json(new {refinement=Transcription.ReadRefinement(vault,id),queueJob=RefinementQueue.Jobs(vault).Where(j=>j.SessionId==id).LastOrDefault() is {} queueJob?RefinementQueue.Summary(queueJob):null,transcript=Transcription.Latest(vault,id)}));
         app.MapPost("/api/local/sessions/{id}/stop", (string id) => {
             if (!Archive.IsRecording(vault, id)) return Results.Conflict();
             if (!File.Exists(Path.Combine(vault.SessionPath(id), "stop-request.sne"))) vault.Write($"sessions/{id}/stop-request.sne", new { kind = "stop-request", qpc100ns = ChunkPump.QpcNow() });

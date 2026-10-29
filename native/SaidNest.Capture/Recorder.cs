@@ -98,6 +98,7 @@ static class Recorder
     public static async Task<Inspection> Record(Vault vault, string? mic, string? output, int seconds, bool testProcess = false, string? liveInstall = null)
     {
         if (seconds is < 1 or > 3600) throw new ArgumentException("Prototype duration must be 1–3600 seconds.");
+        using var priority = new ForegroundIntent(vault);
         List<CaptureTrack> tracks = [];
         if (testProcess)
         {

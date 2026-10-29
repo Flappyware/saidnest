@@ -31,8 +31,23 @@ static partial class Transcription
         .Select(path=>vault.Read($"sessions/{id}/{Path.GetFileName(path)}").Metadata.Deserialize<TranscriptRevision>(Vault.Json)!).ToArray();
     public static void Select(Vault vault,string id,string revisionId)
     {
+        using var selection=SelectionLock(vault,id);
+        SelectUnlocked(vault,id,revisionId);
+    }
+    static FileStream SelectionLock(Vault vault,string id)
+    {
+        string path=Path.Combine(vault.SessionPath(id),"selection.lock");
+        for(int attempt=0;;attempt++) {try {return new FileStream(path,FileMode.OpenOrCreate,FileAccess.ReadWrite,FileShare.None);}catch(IOException)when(attempt<100){Thread.Sleep(10);}}
+    }
+    static void SelectUnlocked(Vault vault,string id,string revisionId)
+    {
         if(!Revisions(vault,id).Any(r=>r.Id==revisionId)) throw new ArgumentException("Unknown transcript revision.");
         vault.Replace($"sessions/{id}/selected.sns",new {id=revisionId});
+    }
+    public static void SelectIfCurrent(Vault vault,string id,string? parent,string revisionId)
+    {
+        using var selection=SelectionLock(vault,id);
+        if(Latest(vault,id)?.Id==parent)SelectUnlocked(vault,id,revisionId);
     }
     public static string Name(EngineInstall install)=>install.ModelName!="unknown"?install.ModelName:Path.GetFileNameWithoutExtension(install.Model).Replace("ggml-","");
     public static string Name(TranscriptRevision revision)=>revision.ModelName!="unknown"?revision.ModelName:revision.ModelSha256=="921e4cf8686fdd993dcd081a5da5b6c365bfde1162e72b08d75ac75289920b1f"?"tiny.en":"Unlabeled model";
@@ -57,7 +72,8 @@ static partial class Transcription
     public static async Task<TranscriptRevision> Run(Vault vault, string id, string installFile, CancellationToken cancellationToken = default, Func<RenderedAudio,string,CancellationToken,Task<TrackTranscript>>? testDecoder=null)
     {
         if (Archive.Inspect(vault, id).State != "complete") throw new InvalidDataException("Transcription currently requires a finalized, verified recording.");
-        using var lease = new FileStream(Path.Combine(vault.Root, "inference.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        using var priority = new ForegroundIntent(vault);
+        using var lease = await InferencePriority.Acquire(vault,cancellationToken);
         var refinementClock=Stopwatch.StartNew(); var startedUtc=DateTimeOffset.UtcNow;
         var parent=Latest(vault,id);
         vault.Replace($"sessions/{id}/refinement.snj",new RefinementStatus("running","Loading local model",0,0,DateTimeOffset.UtcNow,"Preparing a separate refinement revision. Original transcripts are retained.",startedUtc,refinementClock.Elapsed.TotalSeconds));

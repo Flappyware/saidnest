@@ -13,11 +13,12 @@ sealed class AudioWindows(Vault vault, SessionInfo session, TrackInfo track)
     long frames;
     public double Available { get; private set; }
     public int Count => chunks.Count;
-    public void Poll()
+    public void Poll(CancellationToken cancellationToken=default)
     {
         if (track.SampleRate != 48000 || track.BitsPerSample != 32 || track.Encoding != "ieee-float" || track.Channels is < 1 or > 2) throw new InvalidDataException("Unsupported PCM format.");
         while (true)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             string file = $"{track.Id}-{chunks.Count:D8}.snc";
             if (!File.Exists(Path.Combine(vault.SessionPath(session.Id), file))) break;
             var obj = vault.Read($"sessions/{session.Id}/{file}");

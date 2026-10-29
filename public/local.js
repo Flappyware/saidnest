@@ -9,7 +9,8 @@ const status = document.querySelector('#announcement');
 const fixture = document.body.dataset.fixture === 'true';
 let records = [], selectedId, selectedTrack = 'mic', selectedWindow=0, displayedRecord, audioUrl, audioKey, downloadUrl, audioRequest, pollTimer, refreshing=false;
 const liveActive = record => record.state === 'recording' || ['starting','running','finishing'].includes(record.live?.state);
-const active = record => liveActive(record) || record.refinement?.state==='running';
+const queueActive = record => ['queued','deferred','running'].includes(record.queueJob?.state);
+const active = record => liveActive(record) || record.refinement?.state==='running' || queueActive(record);
 const escape = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const trackName = id => id === 'mic' ? 'Microphone' : 'System output';
 const clock = seconds => { const value = Math.max(0, Math.floor(seconds)); return `${Math.floor(value / 60).toString().padStart(2, '0')}:${(value % 60).toString().padStart(2, '0')}`; };
@@ -187,7 +188,7 @@ async function start(silent=false) {
   if(!silent) { list.innerHTML='<p class="empty-state">Opening local archive…</p>'; document.querySelector('#result-count').textContent=''; }
   if (!token) { list.innerHTML='<p class="empty-state">Local archive locked. Reopen it from the launcher.</p>'; refreshing=false; return; }
   try {
-    const saved = silent ? await Promise.all(records.map(async record=>record.refinement?.state==='running' && !liveActive(record) ? {...record,...await (await api(`/api/local/sessions/${record.id}/progress`)).json()} : active(record) ? await (await api(`/api/local/sessions/${record.id}`)).json() : record)) : await (await api('/api/local/sessions')).json();
+    const saved = silent ? await Promise.all(records.map(async record=>(record.refinement?.state==='running'||queueActive(record)) && !liveActive(record) ? {...record,...await (await api(`/api/local/sessions/${record.id}/progress`)).json()} : active(record) ? await (await api(`/api/local/sessions/${record.id}`)).json() : record)) : await (await api('/api/local/sessions')).json();
     if (saved.some(record=>record.state==='corrupt')) notice.textContent='A recording failed verification and was not opened. Its original files are retained for recovery.';
     else if (saved.some(record=>record.state==='recording')) notice.textContent=(fixture?'Synthetic recording fixture. ':'')+'Recording now. Live local text updates automatically. Use Stop recording to finish before the fixed duration.';
     else if (saved.length===100) notice.textContent='Showing the 100 most recently updated recordings. A larger archive browser is planned.';

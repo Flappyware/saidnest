@@ -28,10 +28,14 @@ static class IntegrationTests
         await CheckLive(vault);
         await CheckLiveFailure(vault);
         await CheckQuality(vault,id);
+        await RefinementQueueTests.Run(Path.GetFullPath(root));
 
         using var listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
         listener.Start(); int port = ((IPEndPoint)listener.LocalEndpoint).Port; listener.Stop();
-        var server = LocalServer.Create(vault, Path.GetFullPath("public"), ".saidnest/inference/install.json", port, fixture: true);
+        string queueProfile=Path.Combine(root,"install.json");
+        File.WriteAllText(queueProfile,JsonSerializer.Serialize(new EngineInstall("fixture","fixture","fixture","fixture","fixture","large-v3"),Vault.Json));
+        File.Copy(queueProfile,Path.Combine(root,"install-large-v3.json"));
+        var server = LocalServer.Create(vault, Path.GetFullPath("public"), queueProfile, port, fixture: true);
         await server.App.StartAsync();
         try
         {
@@ -41,6 +45,8 @@ static class IntegrationTests
             Check((await client.GetAsync($"/api/local/sessions/{id}/live")).StatusCode == HttpStatusCode.Unauthorized,"live progress rejects missing token");
             Check((await client.PostAsync($"/api/local/sessions/{id}/stop",null)).StatusCode == HttpStatusCode.Unauthorized,"recording controls reject missing token");
             Check((await client.GetAsync($"/api/local/sessions/{id}/evaluation")).StatusCode==HttpStatusCode.Unauthorized,"model hypotheses and references require authorization");
+            Check((await client.GetAsync("/api/local/refinement-queue")).StatusCode==HttpStatusCode.Unauthorized,"queue metadata requires authorization");
+            Check((await client.PostAsync($"/api/local/sessions/{id}/queue-refinement",null)).StatusCode==HttpStatusCode.Unauthorized,"queue mutations require authorization");
             Check((await client.PutAsync($"/api/local/sessions/{id}/evaluation/unknown",new StringContent("{}",System.Text.Encoding.UTF8,"application/json"))).StatusCode==HttpStatusCode.Unauthorized,"reference writes reject missing token");
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", server.Token);
             var sessions = await client.GetAsync("/api/local/sessions");
@@ -75,6 +81,15 @@ static class IntegrationTests
             Check(scores.RootElement.GetProperty("summaries").EnumerateArray().All(s=>s.GetProperty("verifiedReferences").GetInt32()==1),"every compared model uses the same checked reference");
             Check(scores.RootElement.GetProperty("summaries").EnumerateArray().Single(s=>s.GetProperty("model").GetProperty("name").GetString()=="large-v3").GetProperty("wordErrorRate").GetDouble()==0,"reference scores the matching synthetic hypothesis");
             Evaluation.SaveReference(vault,id,caseId,"Keep the recording and its words together.",false);
+            var queued=await client.PostAsync($"/api/local/sessions/{id}/queue-refinement",new StringContent("{\"model\":\"large-v3\"}",System.Text.Encoding.UTF8,"application/json"));
+            Check(queued.StatusCode==HttpStatusCode.Accepted,"owner can enqueue without waiting for inference");
+            using var queuedBody=JsonDocument.Parse(await queued.Content.ReadAsStringAsync());string queueId=queuedBody.RootElement.GetProperty("id").GetString()!;
+            Check(!queuedBody.RootElement.TryGetProperty("install",out _),"queue summary does not expose executable paths or transcript words");
+            Check((await client.PostAsync($"/api/local/refinement-queue/{queueId}",new StringContent("{\"action\":\"pause\"}",System.Text.Encoding.UTF8,"application/json"))).IsSuccessStatusCode,"owner can pause queued work");
+            Check(RefinementQueue.Read(vault,queueId).State=="paused","pause is persisted");
+            using var foreignQueue=new HttpRequestMessage(HttpMethod.Post,$"/api/local/refinement-queue/{queueId}");foreignQueue.Headers.Add("Origin","https://example.invalid");foreignQueue.Content=new StringContent("{\"action\":\"resume\"}",System.Text.Encoding.UTF8,"application/json");
+            Check((await client.SendAsync(foreignQueue)).StatusCode==HttpStatusCode.Forbidden,"cross-origin queue mutations are denied");
+            Check((await client.PostAsync($"/api/local/sessions/{id}/queue-refinement",new StringContent("{\"model\":\"../unknown\"}",System.Text.Encoding.UTF8,"application/json"))).StatusCode==HttpStatusCode.UnprocessableEntity,"queue accepts provisioned profile names only");
         }
         finally { await server.App.StopAsync(); await server.App.DisposeAsync(); }
         Console.WriteLine("Passed: pause-aligned WAV, pause diagnostics, bounded transcript timestamps, private API/audio authentication, no-store responses, cross-origin denial, Host validation, and static vault-file denial. Synthetic fixtures only.");

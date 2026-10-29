@@ -35,7 +35,8 @@ sealed class LiveTranscription(Vault vault, SessionInfo session, string installF
         var progress = session.Tracks.ToDictionary(t => t.Id, t => new LiveProgress(t.Id, 0, 0, 0, 0, -200, -200, 0));
         try
         {
-            using var lease = new FileStream(Path.Combine(vault.Root, "inference.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            using var priority = new ForegroundIntent(vault);
+            using var lease = await InferencePriority.Acquire(vault,cancellation.Token);
             var install = testDecoder == null ? await Transcription.Load(installFile, cancellation.Token) : new EngineInstall("fixture", "fixture", "fixture", "fixture", "fixture");
             engine = install;
             var indexes = session.Tracks.ToDictionary(t => t.Id, t => new AudioWindows(vault, session, t));

@@ -1,4 +1,4 @@
-param([int]$Seconds = 600, [string]$MicrophoneName, [switch]$UseDefaultOutput, [string]$OutputId, [switch]$Live,[ValidateSet('tiny.en','small.en','large-v3-turbo','large-v3')][string]$LiveModel='tiny.en',[ValidateSet('tiny.en','small.en','large-v3-turbo','large-v3')][string]$RefineModel)
+param([int]$Seconds = 600, [string]$MicrophoneName, [switch]$UseDefaultOutput, [string]$OutputId, [switch]$Live,[ValidateSet('tiny.en','small.en','large-v3-turbo','large-v3')][string]$LiveModel='tiny.en',[ValidateSet('tiny.en','small.en','large-v3-turbo','large-v3')][string]$RefineModel,[switch]$NoRefinement)
 $ErrorActionPreference = 'Stop'
 $captureRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 Set-Location -LiteralPath $captureRoot
@@ -54,8 +54,9 @@ if ($Live) {
 if($RefineModel) {
     $refinementInstall=if($RefineModel -eq 'tiny.en'){'.saidnest/inference/install.json'}else{".saidnest/inference/install-$RefineModel.json"}
     if(-not (Test-Path -LiteralPath $refinementInstall)) { throw 'Provision the selected refinement model first.' }
-    $captureArguments+=@('--refine-install',$refinementInstall)
+    $captureArguments+=@('--queue-refine',$RefineModel)
 }
+if($NoRefinement){$captureArguments+='--no-refinement'}
 if ($captureMic) { $captureArguments += @('--mic', $captureMic) }
 if ($captureOutput) { $captureArguments += @('--output', $captureOutput) }
 Write-Host "`nRecording starts now. P pauses/resumes. Q stops. Audio stays in the local encrypted vault."

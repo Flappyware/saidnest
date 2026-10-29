@@ -2,7 +2,7 @@ namespace SaidNest.Capture;
 
 static class ModelProfiles
 {
-    static readonly string[] Names=["tiny.en","small.en","large-v3-turbo","large-v3"];
+    public static readonly string[] Names=["tiny.en","small.en","large-v3-turbo","large-v3"];
     public static bool Busy(Vault vault)
     {
         string path=Path.Combine(vault.Root,"inference.lock");if(!File.Exists(path))return false;

@@ -17,6 +17,27 @@ static class Program
             if (command == "devices") { Console.WriteLine(JsonSerializer.Serialize(Recorder.Devices(), Vault.Json)); return 0; }
             if (command == "output-activity") { Console.WriteLine(JsonSerializer.Serialize(await Recorder.OutputActivity(), Vault.Json)); return 0; }
             if (command == "integration-test") { await IntegrationTests.Run(Option("--out") ?? ".saidnest/integration-tests"); return 0; }
+            if(command=="queue-cuda-smoke") {await RefinementQueueTests.CudaSmoke(Path.GetFullPath(Option("--out") ?? ".saidnest/queue-cuda-tests"),Path.GetFullPath(Option("--install") ?? ".saidnest/inference/install.json"));return 0;}
+            if(command=="idle-status") {var environment=new IdleEnvironment();environment.Read();await Task.Delay(1000);Console.WriteLine(JsonSerializer.Serialize(environment.Read(),Vault.Json));return 0;}
+            if(command is "queue-refinement" or "refinement-queue" or "refinement-policy" or "refinement-worker") {
+                using var vault=Vault.Open(root);
+                if(command=="queue-refinement")Console.WriteLine(JsonSerializer.Serialize(RefinementQueue.Summary(RefinementQueue.Enqueue(vault,Option("--session") ?? throw new ArgumentException("Select --session ID."),Option("--install") ?? ".saidnest/inference/install.json",Option("--model") ?? RefinementQueue.Policy(vault).Model)),Vault.Json));
+                else if(command=="refinement-policy") {
+                    var policy=RefinementQueue.Policy(vault);
+                    if(Option("--idle-seconds") is {} idle)policy=policy with {IdleSeconds=int.Parse(idle)};
+                    if(Option("--max-cpu") is {} cpu)policy=policy with {MaxCpuBusyFraction=double.Parse(cpu,System.Globalization.CultureInfo.InvariantCulture)};
+                    if(Option("--model") is {} model)policy=policy with {Model=model};
+                    if(args.Contains("--disable"))policy=policy with {Enabled=false};if(args.Contains("--enable"))policy=policy with {Enabled=true};
+                    if(args.Contains("--allow-battery"))policy=policy with {RequireAcPower=false};if(args.Contains("--require-ac"))policy=policy with {RequireAcPower=true};
+                    if(args.Contains("--no-auto-queue"))policy=policy with {QueueNewRecordings=false};if(args.Contains("--auto-queue"))policy=policy with {QueueNewRecordings=true};
+                    RefinementQueue.SetPolicy(vault,policy);Console.WriteLine(JsonSerializer.Serialize(policy,Vault.Json));
+                } else if(command=="refinement-worker") {
+                    using var stop=new CancellationTokenSource();ConsoleCancelEventHandler handler=(_,e)=>{e.Cancel=true;stop.Cancel();};Console.CancelKeyPress+=handler;
+                    try {Console.WriteLine("Idle refinement worker running locally. Ctrl+C checkpoints and stops it.");await RefinementQueue.Run(vault,stop.Token);}finally{Console.CancelKeyPress-=handler;}
+                } else if(Option("--job") is {} job)Console.WriteLine(JsonSerializer.Serialize(RefinementQueue.Summary(RefinementQueue.Control(vault,job,Option("--action") ?? throw new ArgumentException("Select --action pause, resume, or cancel."))),Vault.Json));
+                else Console.WriteLine(JsonSerializer.Serialize(new {policy=RefinementQueue.Policy(vault),jobs=RefinementQueue.Jobs(vault).Select(RefinementQueue.Summary)},Vault.Json));
+                return 0;
+            }
             if (command == "serve-fixture")
             {
                 string fixtureRoot = Path.Combine(Option("--out") ?? ".saidnest/ui-fixtures", Guid.NewGuid().ToString("N"));
@@ -24,6 +45,12 @@ static class Program
                 string fixtureId = await IntegrationTests.Fixture(fixtureVault);
                 if(args.Contains("--quality")) {
                     await Transcription.Run(fixtureVault,fixtureId,"fixture",testDecoder:(audio,track,_)=>Task.FromResult(new TrackTranscript(track,"transcribed",audio.DurationSeconds,"Synthetic refinement fixture",[new(track,0,audio.DurationSeconds,"A synthetic refined transcript for interface verification.")])));
+                }
+                if(args.Contains("--queue")) {
+                    string profile=Path.Combine(fixtureRoot,"install.json");
+                    File.WriteAllText(Path.Combine(fixtureRoot,"install-large-v3.json"),JsonSerializer.Serialize(new EngineInstall("fixture","fixture","fixture","fixture","fixture","large-v3"),Vault.Json));
+                    var job=RefinementQueue.Enqueue(fixtureVault,fixtureId,profile,"large-v3");
+                    fixtureVault.Replace($"refinement-queue/job-{job.Id}.snq",job with {State="deferred",Notice="Synthetic queue fixture. Waiting for idle time; no background inference runs in this preview."});
                 }
                 using var fixtureLease = args.Contains("--live") ? new FileStream(Path.Combine(fixtureVault.SessionPath(fixtureId),"capture.lock"),FileMode.Open,FileAccess.ReadWrite,FileShare.None) : null;
                 if (fixtureLease!=null)
@@ -185,6 +212,12 @@ static class Program
                         Console.Error.WriteLine("Recording was saved. Later refinement did not finish; original audio and live text are retained.");return 3;
                     }
                 }
+                else if(result.State=="complete" && !args.Contains("--no-refinement") && (RefinementQueue.Policy(vault).QueueNewRecordings || Option("--queue-refine")!=null)) {
+                    try {
+                        var job=RefinementQueue.Enqueue(vault,result.Id,".saidnest/inference/install.json",Option("--queue-refine") ?? RefinementQueue.Policy(vault).Model);
+                        Console.WriteLine($"High-quality refinement queued ({job.Model}). It runs when idle while the local timeline or refinement worker is open.");
+                    }catch(Exception ex)when(ex is IOException or InvalidDataException or CryptographicException or JsonException or ArgumentException) {Console.WriteLine("Recording saved. Refinement was not queued; provision the selected model, then queue it from the local timeline.");}
+                }
                 return result.State == "complete" ? 0 : 2;
             }
             if (command is "inspect" or "sessions" or "export")
@@ -224,6 +257,10 @@ static class Program
                   replay --session ID --install PROFILE.json  Replay the full live schedule offline
                   report-speaker-bleed --session ID  Save owner-reported capture context
                   echo-check --session ID          Print waveform similarity metrics, without words
+                  queue-refinement --session ID [--model large-v3]  Queue resumable idle work
+                  refinement-queue [--job ID --action pause|resume|cancel]  Show/control local queue
+                  refinement-policy [--idle-seconds 120] [--max-cpu 0.25] [--allow-battery]
+                  refinement-worker                Run the idle worker without opening the timeline
                   serve [--port 8788]               Open the authenticated loopback-only timeline
                   open                             Reopen the running private timeline without printing its key
                   live-status --session ID          Show counts and timing only; no transcript text
